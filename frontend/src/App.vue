@@ -120,8 +120,6 @@ const MODEL_PRICING = {
 const MODEL_NAME_MAPPING: { [key: string]: keyof typeof MODEL_PRICING } = {
   'gemini-2.5-pro': 'gemini-2.5-pro',
   'gemini-2.5-flash': 'gemini-2.5-flash',
-  'gemini-2.5-pro': 'gemini-2.5-pro',
-  'gemini-2.5-flash': 'gemini-2.5-flash',
 }
 
 
@@ -131,7 +129,9 @@ interface MessagePart {
 }
 interface Message {
   role: 'user' | 'model';
-  parts: MessagePart[];
+  // 将 parts 的类型从 MessagePart[] 修改为 [MessagePart, ...MessagePart[]]
+  // 这表示 parts 数组至少包含一个 MessagePart 元素
+  parts: [MessagePart, ...MessagePart[]];
   sentChars?: number;
   receivedChars?: number;
   // 新增：用于存储 token 和费用信息
@@ -156,7 +156,7 @@ const isAuthenticated = ref(false); // 新增：用于控制访问权限
 const chatWindowRef = ref<HTMLElement | null>(null);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const streamBuffer = ref(''); // 文本缓冲区
-const rendererIntervalId = ref<NodeJS.Timeout | null>(null); // 渲染器定时器 ID
+const rendererIntervalId = ref<number | null>(null); // 渲染器定时器 ID
 
 // --- API 配置 ---
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -235,16 +235,18 @@ const startStreamRenderer = (modelMessageIndex: number) => {
   rendererIntervalId.value = setInterval(() => {
     if (streamBuffer.value.length > 0) {
       
+      const messageToUpdate = conversationHistory.value[modelMessageIndex]!; // 添加非空断言，并存为变量
+      
       // --- 核心修改 1: 固定渲染速度 ---
       const charsToRender = 2; // 每次只渲染 2 个字符，可以调整这个值来控制速度
       const textToAdd = streamBuffer.value.substring(0, charsToRender);
       
       // --- 核心修改 2: 首次替换，后续追加 ---
       if (isFirstRender) {
-        conversationHistory.value[modelMessageIndex].parts[0].text = textToAdd;
+        messageToUpdate.parts[0].text = textToAdd;
         isFirstRender = false; // 更新标志
       } else {
-        conversationHistory.value[modelMessageIndex].parts[0].text += textToAdd;
+        messageToUpdate.parts[0].text += textToAdd;
       }
       
       streamBuffer.value = streamBuffer.value.substring(charsToRender);
@@ -261,7 +263,7 @@ const startStreamRenderer = (modelMessageIndex: number) => {
       clearInterval(rendererIntervalId.value!);
       rendererIntervalId.value = null;
     }
-  }, 40); // 将间隔时间从 20ms 延长到 40ms，让输出更平缓
+  }, 10);
 };
 
 // 发送消息 (核心逻辑修改)
@@ -331,7 +333,7 @@ const sendMessage = async () => {
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let isFirstChunk = true;
+
         let fullResponseText = '';
         let usageMetadata: { promptTokenCount: number; candidatesTokenCount: number } | null = null;
         
@@ -374,7 +376,7 @@ const sendMessage = async () => {
             }
         }
         
-        const finalModelMessage = conversationHistory.value[modelMessageIndex];
+       const finalModelMessage = conversationHistory.value[modelMessageIndex]!; // 添加非空断言
         finalModelMessage.receivedChars = fullResponseText.length;
         if (usageMetadata) {
             const { promptTokenCount, candidatesTokenCount } = usageMetadata;
@@ -393,8 +395,8 @@ const sendMessage = async () => {
         if (error.name === 'AbortError') {
             console.log('生成已停止。');
             // 停止时，让渲染器自己处理完缓冲区剩余内容
-            const currentText = conversationHistory.value[modelMessageIndex].parts[0].text;
-            if (currentText.trim() === '') {
+            const abortedMessage = conversationHistory.value[modelMessageIndex];
+            if (abortedMessage && abortedMessage.parts[0].text.trim() === '') {
                  conversationHistory.value.splice(modelMessageIndex, 1);
             } else {
                  streamBuffer.value += '\n\n**[生成已停止]**';
