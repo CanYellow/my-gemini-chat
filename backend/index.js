@@ -22,7 +22,8 @@ const app = express();
 // 使用 cors 中间件处理跨域请求
 app.use(cors({ origin: FRONTEND_ORIGIN }));
 // 使用 express.json() 中间件解析 JSON 请求体
-app.use(express.json());
+//app.use(express.json());
+app.use(express.json({ limit: '5mb' })); // 将默认的100kb提高到5mb
 
 // --- 新增：配置速率限制中间件 ---
 const limiter = rateLimit({
