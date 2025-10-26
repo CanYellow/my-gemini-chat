@@ -103,3 +103,4 @@ Thumbs.db
 .yarn/plug-n-play
 .yarn/unplugged
 .pnpm-store/
+*Zone.Identifier

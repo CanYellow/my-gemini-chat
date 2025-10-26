@@ -1,5 +1,5 @@
 <template>
-  <div id="app">
+  <div id="app" :style="{ '--base-font-size': selectedFontSize }">
       <!-- 使用 template 标签和 v-if 来包裹整个聊天界面 -->
     <template v-if="isAuthenticated">
     <div id="header">
@@ -17,6 +17,13 @@
           <option value="8">最近4轮</option>
           <option value="4">最近2轮</option>
           <option value="0">无上下文</option>
+        </select>
+        <!-- 在“选择上下文轮次”的 select 后面添加 -->
+        <select v-model="selectedFontSize" title="选择字体大小">
+          <option value="12px">小</option>
+          <option value="13px">默认</option>
+          <option value="14px">中</option>
+          <option value="16px">大</option>
         </select>
       </div>
     </div>
@@ -151,15 +158,16 @@ const shouldAutoScroll = ref(true); // 新增：用于控制当前消息是否�
 const abortController = ref<AbortController | null>(null);
 const showCompletionHint = ref(false);
 const isAuthenticated = ref(false); // 新增：用于控制访问权限
+const selectedFontSize = ref('13px'); // 新增：用于控制全局字体大小
 
 // --- DOM 引用 ---
 const chatWindowRef = ref<HTMLElement | null>(null);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
-const streamBuffer = ref(''); // 文本缓冲区
-const rendererIntervalId = ref<number | null>(null); // 渲染器定时器 ID
+// 注意：streamBuffer 和 rendererIntervalId 已被移除
 
 // --- API 配置 ---
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
 
 // --- 方法 ---
 
@@ -176,14 +184,46 @@ const scrollToBottom = (force = false) => {
   });
 };
 
-// 动态调整文本框高度 (无需修改)
+// 动态调整文本框高度 (已修正，支持智能滚动)
 const autoResizeTextarea = (event: Event) => {
   const textarea = event.target as HTMLTextAreaElement;
+
+  // --- 新增：在调整大小前，检查滚动条是否在底部 ---
+  // 我们设置一个小的容差值（例如 5px），以防计算出现微小误差
+  const isScrolledToBottom = textarea.scrollHeight - textarea.scrollTop - textarea.clientHeight < 5;
+
+  // 保持原有的高度调整逻辑
   textarea.style.height = 'auto';
   const newHeight = Math.min(textarea.scrollHeight, 120);
   textarea.style.height = `${newHeight}px`;
-  textarea.scrollTop = textarea.scrollHeight;
+
+  // --- 修改：只有当用户之前就在底部时，才执行滚动 ---
+  // 这样，当用户在中间编辑时，视图不会跳动
+  if (isScrolledToBottom) {
+    textarea.scrollTop = textarea.scrollHeight;
+  }
 };
+
+// --- 新增：为 marked 创建自定义渲染器 ---
+const renderer = new marked.Renderer();
+const originalCodeRenderer = renderer.code; // 保存原始的 code 渲染器
+
+renderer.code = function(code, lang, isEscaped) {
+  const rawCodeBlock = originalCodeRenderer.call(this, code, lang, isEscaped);
+  
+  // 新增：更丰富的按钮HTML，包含一个用于显示文本的<span>
+  const copyButton = `
+    <button class="copy-code-button" title="Copy code">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+      <span class="copy-text">Copy</span>
+    </button>
+  `;
+  
+  return `<div class="code-block-wrapper">${copyButton}${rawCodeBlock}</div>`;
+};
+
+// --- 使用我们的自定义渲染器 ---
+marked.use({ renderer });
 
 // 安全地渲染 Markdown (无需修改)
 const renderMarkdown = (text: string) => {
@@ -224,48 +264,6 @@ const calculateCost = (model: keyof typeof MODEL_PRICING, inputTokens: number, o
   return { inputCost, outputCost }; // 直接返回美元成本
 };
 
-// --- 新增：平滑流式输出的渲染器 (已优化) ---
-const startStreamRenderer = (modelMessageIndex: number) => {
-  if (rendererIntervalId.value) {
-    clearInterval(rendererIntervalId.value);
-  }
-
-  let isFirstRender = true; // 新增一个标志，用于判断是否是首次渲染
-
-  rendererIntervalId.value = setInterval(() => {
-    if (streamBuffer.value.length > 0) {
-      
-      const messageToUpdate = conversationHistory.value[modelMessageIndex]!; // 添加非空断言，并存为变量
-      
-      // --- 核心修改 1: 固定渲染速度 ---
-      const charsToRender = 2; // 每次只渲染 2 个字符，可以调整这个值来控制速度
-      const textToAdd = streamBuffer.value.substring(0, charsToRender);
-      
-      // --- 核心修改 2: 首次替换，后续追加 ---
-      if (isFirstRender) {
-        messageToUpdate.parts[0].text = textToAdd;
-        isFirstRender = false; // 更新标志
-      } else {
-        messageToUpdate.parts[0].text += textToAdd;
-      }
-      
-      streamBuffer.value = streamBuffer.value.substring(charsToRender);
-
-      if (shouldAutoScroll.value) {
-        scrollToBottom(true);
-      }
-    } else if (!isLoading.value) {
-      // 在这里，当缓冲区为空且加载已停止时，渲染才算真正完成。
-      // 这是判断是否显示“新消息”提示的正确时机。
-      if (!shouldAutoScroll.value) {
-        showCompletionHint.value = true;
-      }
-      clearInterval(rendererIntervalId.value!);
-      rendererIntervalId.value = null;
-    }
-  }, 10);
-};
-
 // 发送消息 (核心逻辑修改)
 const sendMessage = async () => {
     showCompletionHint.value = false;
@@ -301,13 +299,10 @@ const sendMessage = async () => {
     if (textareaRef.value) textareaRef.value.style.height = 'auto';
     scrollToBottom(true);
 
-    const modelMessage: Message = { role: 'model', parts: [{ text: '思考中...' }] }; // --- 修改：初始文本为空，等待渲染器填充
+    const modelMessage: Message = { role: 'model', parts: [{ text: '思考中...' }] };
     conversationHistory.value.push(modelMessage);
     const modelMessageIndex = conversationHistory.value.length - 1;
     const apiModelName = MODEL_NAME_MAPPING[selectedModel.value] || selectedModel.value;
-    
-    streamBuffer.value = ''; // --- 新增：清空缓冲区
-    startStreamRenderer(modelMessageIndex); // --- 新增：启动渲染器
 
     try {
         const response = await fetch(`${API_BASE_URL}/api/chat`, {
@@ -325,47 +320,45 @@ const sendMessage = async () => {
             try {
                 const errorData = await response.json();
                 errorText = errorData.error?.message || JSON.stringify(errorData);
-            } catch (e) {
-                errorText = response.statusText;
-            }
+            } catch (e) { /* 忽略解析错误 */ }
             throw new Error(errorText);
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-
         let fullResponseText = '';
         let usageMetadata: { promptTokenCount: number; candidatesTokenCount: number } | null = null;
-        
-        // --- 修改：在接收数据前设置滚动锁 ---
+        let isFirstChunk = true;
         const chatWindow = chatWindowRef.value;
         if (chatWindow) {
-            const isAtBottom = chatWindow.scrollHeight - chatWindow.scrollTop - chatWindow.clientHeight < 100;
-            shouldAutoScroll.value = isAtBottom;
+            shouldAutoScroll.value = chatWindow.scrollHeight - chatWindow.scrollTop - chatWindow.clientHeight < 40;
         }
 
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
-
-            const chunk = decoder.decode(value);
+            const chunk = decoder.decode(value, { stream: true });
             const lines = chunk.split('\n');
-
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
                     const jsonStr = line.substring(6).trim();
                     if (!jsonStr || jsonStr === '[DONE]') continue;
-
                     try {
                         const data = JSON.parse(jsonStr);
                         const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
                         if (textContent) {
-                            // isFirstChunk 的逻辑已移至渲染器，这里直接将数据送入缓冲区即可
-                            streamBuffer.value += textContent;
+                            const messageToUpdate = conversationHistory.value[modelMessageIndex]!;
+                            if (isFirstChunk) {
+                                messageToUpdate.parts[0].text = textContent;
+                                isFirstChunk = false;
+                            } else {
+                                messageToUpdate.parts[0].text += textContent;
+                            }
                             fullResponseText += textContent;
+                            if (shouldAutoScroll.value) {
+                                scrollToBottom(true);
+                            }
                         }
-
                         if (data.usageMetadata) {
                             usageMetadata = data.usageMetadata;
                         }
@@ -376,15 +369,15 @@ const sendMessage = async () => {
             }
         }
         
-       const finalModelMessage = conversationHistory.value[modelMessageIndex]!; // 添加非空断言
+        if (!shouldAutoScroll.value) {
+          showCompletionHint.value = true;
+        }
+
+        const finalModelMessage = conversationHistory.value[modelMessageIndex]!;
         finalModelMessage.receivedChars = fullResponseText.length;
         if (usageMetadata) {
             const { promptTokenCount, candidatesTokenCount } = usageMetadata;
-            const { inputCost, outputCost } = calculateCost(
-                apiModelName,
-                promptTokenCount,
-                candidatesTokenCount
-            );
+            const { inputCost, outputCost } = calculateCost(apiModelName, promptTokenCount, candidatesTokenCount);
             finalModelMessage.inputTokens = promptTokenCount;
             finalModelMessage.outputTokens = candidatesTokenCount;
             finalModelMessage.inputCost = inputCost;
@@ -392,25 +385,29 @@ const sendMessage = async () => {
         }
 
     } catch (error: any) {
-        if (error.name === 'AbortError') {
-            console.log('生成已停止。');
-            // 停止时，让渲染器自己处理完缓冲区剩余内容
-            const abortedMessage = conversationHistory.value[modelMessageIndex];
-            if (abortedMessage && abortedMessage.parts[0].text.trim() === '') {
-                 conversationHistory.value.splice(modelMessageIndex, 1);
+        // --- 关键修改就在这个 catch 块里 ---
+        const messageToUpdate = conversationHistory.value[modelMessageIndex];
+        // 确保消息仍然存在，以防万一
+        if (messageToUpdate) {
+            if (error.name === 'AbortError') {
+                console.log('生成已手动停止。');
+                // 如果消息仍然是“思考中...”，则直接替换它
+                if (messageToUpdate.parts[0].text === '思考中...') {
+                    messageToUpdate.parts[0].text = '**[生成已手动停止]**';
+                } else {
+                    // 如果已经有部分内容，则在后面追加停止信息
+                    messageToUpdate.parts[0].text += '\n\n**[生成已手动停止]**';
+                }
             } else {
-                 streamBuffer.value += '\n\n**[生成已停止]**';
+                console.error('发送消息时出错:', error);
+                const errorMessage = error instanceof Error ? error.message : '未知错误';
+                messageToUpdate.parts[0].text = `**出错了:** ${errorMessage}`;
             }
-        } else {
-            console.error('发送消息时出错:', error);
-            const errorMessage = error instanceof Error ? error.message : '未知错误';
-            streamBuffer.value += `**出错了:** ${errorMessage}`;
         }
         scrollToBottom(true);
     } finally {
         isLoading.value = false;
         abortController.value = null;
-        // 注意：不要在这里清除 interval，让它自然结束
         nextTick(() => {
             textareaRef.value?.focus();
         });
@@ -421,7 +418,7 @@ const sendMessage = async () => {
 const handleScroll = () => {
   const chatWindow = chatWindowRef.value;
   if (chatWindow) {
-    const isNearBottom = chatWindow.scrollHeight - chatWindow.scrollTop - chatWindow.clientHeight < 150;
+    const isNearBottom = chatWindow.scrollHeight - chatWindow.scrollTop - chatWindow.clientHeight < 40;
 
     // 核心修改：实时根据用户滚动位置更新自动滚动状态
     // 如果用户在底部附近，我们就认为他希望自动滚动。一旦他向上滚动，就立即禁用。
@@ -444,48 +441,89 @@ const forceScrollToBottom = () => {
 const stopGeneration = () => {
   if (abortController.value) {
     abortController.value.abort();
-    isLoading.value = false; // 这会触发渲染器在清空缓冲区后自动停止
+    // isLoading 会在 sendMessage 的 finally 块中被设置为 false
   }
-  // --- 新增：如果渲染器仍在运行，也立即清除它 ---
-  if (rendererIntervalId.value) {
-    clearInterval(rendererIntervalId.value);
-    rendererIntervalId.value = null;
+};
+
+// 新增：处理复制按钮点击的函数 (事件委托)
+const handleChatWindowClick = async (event: MouseEvent) => {
+  const target = event.target as HTMLElement;
+  // 使用 .closest() 来确保即使用户点击了按钮内的图标或文字也能找到按钮
+  const copyButton = target.closest('.copy-code-button');
+
+  // 如果点击的不是复制按钮，或者按钮已经处于“已复制”状态，则不执行任何操作
+  if (!copyButton || copyButton.classList.contains('copied')) {
+    return;
+  }
+
+  // 从按钮向上查找整个代码块的容器
+  const wrapper = copyButton.closest('.code-block-wrapper');
+  if (!wrapper) return;
+
+  // 在容器内找到 <pre> 标签，它的 innerText 包含我们需要的纯文本代码
+  const preElement = wrapper.querySelector('pre');
+  if (!preElement) return;
+
+  const codeToCopy = preElement.innerText;
+
+  try {
+    // 尝试将文本写入剪贴板
+    await navigator.clipboard.writeText(codeToCopy);
+    
+    const copyText = copyButton.querySelector('.copy-text');
+    if (copyText) {
+      copyText.textContent = 'Copied!';
+    }
+    copyButton.classList.add('copied');
+
+    // 2秒后恢复按钮状态
+    setTimeout(() => {
+      if (copyText) {
+        copyText.textContent = 'Copy';
+      }
+      copyButton.classList.remove('copied');
+    }, 2000);
+  } catch (err) {
+    console.error('Failed to copy text: ', err);
+    const copyText = copyButton.querySelector('.copy-text');
+    if (copyText) copyText.textContent = 'Error';
+     setTimeout(() => {
+      if (copyText) {
+        copyText.textContent = 'Copy';
+      }
+    }, 2000);
   }
 };
 
 onMounted(() => {
-  // --- 新增：访问权限验证逻辑 ---
   const SECRET_KEY = import.meta.env.VITE_ACCESS_KEY;
   if (!SECRET_KEY) {
     console.error("错误：未在 .env.local 文件中设置 VITE_ACCESS_KEY");
-    isAuthenticated.value = false; // 如果未设置密钥，则锁定应用
+    isAuthenticated.value = false;
     return;
   }
-
-  // 1. 首先检查 sessionStorage
   if (sessionStorage.getItem('app_access_key') === SECRET_KEY) {
     isAuthenticated.value = true;
   } else {
-    // 2. 如果 sessionStorage 中没有，则检查 URL 参数
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
-
     if (token === SECRET_KEY) {
       isAuthenticated.value = true;
-      // 验证成功后，将密钥存入 sessionStorage
       sessionStorage.setItem('app_access_key', SECRET_KEY);
-      // 并从 URL 中移除 token 参数，以增强安全性
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }
 
-  // 如果验证通过，才执行后续操作
   if (isAuthenticated.value) {
-    textareaRef.value?.focus();
-    const chatWindow = chatWindowRef.value;
-    if (chatWindow) {
-      chatWindow.addEventListener('scroll', handleScroll);
-    }
+    nextTick(() => { // 使用 nextTick 确保 DOM 已经渲染
+        textareaRef.value?.focus();
+        const chatWindow = chatWindowRef.value;
+        if (chatWindow) {
+          chatWindow.addEventListener('scroll', handleScroll);
+          // 关键：在这里为父容器添加点击事件监听器
+          chatWindow.addEventListener('click', handleChatWindowClick); 
+        }
+    });
   }
 });
 
@@ -493,6 +531,8 @@ onUnmounted(() => {
   const chatWindow = chatWindowRef.value;
   if (chatWindow) {
     chatWindow.removeEventListener('scroll', handleScroll);
+    // 关键：组件销毁时移除监听器，防止内存泄漏
+    chatWindow.removeEventListener('click', handleChatWindowClick); 
   }
 });
 </script>
@@ -508,7 +548,6 @@ body {
   align-items: center;
   height: 100vh;
   color: #333;
-  font-size: 15px;
 }
 
 #app {
@@ -522,6 +561,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  font-size: var(--base-font-size, 13px); /* 确保有这一行 */
 }
 
 #header {
@@ -594,7 +634,10 @@ h1 {
   background: #007bff;
   color: white;
   border-bottom-right-radius: 4px;
+  max-width: 100%; 
   white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word; /* 新增：更强力地处理长单词或URL，确保其在气泡内换行 */
 }
 
 .message.model {
@@ -606,6 +649,9 @@ h1 {
   background: #e9ecef;
   color: #333;
   border-bottom-left-radius: 4px;
+  max-width: 100%;          /* 1. 定死宽度：强制气泡宽度不能超过其父容器 (.message.model) 的宽度 */
+  overflow-wrap: break-word; /* 2. 文本换行：确保气泡内的普通长文本可以换行 */
+  word-break: break-all;     /* 3. 强力换行：进一步确保非代码文本不会撑开气泡 */
 }
 
 .token-info {
@@ -643,7 +689,7 @@ h1 {
   border: none;
   border-radius: 20px;
   padding: 8px 16px;
-  font-size: 14px;
+  font-size: calc(var(--base-font-size, 13px) - 1px);
   font-weight: 500;
   cursor: pointer;
   box-shadow: 0 2px 10px rgba(0,0,0,0.2);
@@ -692,7 +738,7 @@ h1 {
   height: 44px;
   margin-left: 10px;
   cursor: pointer;
-  font-size: 18px;
+  font-size: calc(var(--base-font-size, 13px) * 1.4);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -722,8 +768,9 @@ h1 {
   padding: 0.8em;
   margin: 0.5em 0;
   border-radius: 8px;
-  overflow-x: auto;
+  overflow-x: auto; /* 关键：这条规则本身是正确的，现在它的父元素行为正常了，它就能正确工作 */
   font-size: 0.9em;
+  white-space: pre; /* 新增：明确指定代码块内的空白和换行行为，防止意外的自动换行 */
 }
 .message.model .text code {
   font-family: 'Courier New', Courier, monospace;
@@ -801,5 +848,151 @@ h1 {
   max-width: 90%;
   margin-top: 20px;
   margin-bottom: 20px;
+}
+
+/* 
+ * ===================================================================
+ *  最终的、保证有效的滚动条样式 (Chrome/WebKit 核心)
+ * ===================================================================
+ */
+
+/* 
+ * -------------------------------------------------------------------
+ *  A. 美化【页面主滚动条】(应用浅色主题)
+ * -------------------------------------------------------------------
+ *  我们不再对 #chat-window 进行修改，而是直接修改全局的滚动条。
+ *  在您的布局中，这会稳定地应用到主聊天窗口的滚动条上。
+ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background-color: #f1f1f1; /* 轨道背景色 */
+}
+
+/* 定义滑块的样式 */
+::-webkit-scrollbar-thumb {
+  background-color: #c1c1c1; /* 滑块颜色 */
+  border-radius: 4px;
+}
+
+/* 鼠标悬浮在滑块上时的样式 */
+::-webkit-scrollbar-thumb:hover {
+  background-color: #a8a8a8; /* 滑块颜色加深 */
+}
+
+
+/* 
+ * -------------------------------------------------------------------
+ *  B. 美化【代码块内部】的【水平】滚动条 (应用深色主题)
+ *     这部分样式具有更高的特异性，会覆盖上面的全局设置。
+ * -------------------------------------------------------------------
+ */
+.message.model .text pre::-webkit-scrollbar {
+  /* 尺寸和轨道背景在代码块中需要重新定义 */
+  height: 8px;
+  background-color: #3d4451; /* 代码块滚动条的轨道颜色 */
+}
+
+/* 定义代码块中滑块的样式 */
+.message.model .text pre::-webkit-scrollbar-thumb {
+  background-color: #6c757d; /* 代码块滑块颜色 */
+  border-radius: 4px;
+  border: 2px solid #3d4451; /* 使用边框创建内边距效果，让滑块看起来更精致 */
+}
+
+/* 鼠标悬浮在代码块滑块上时的样式 */
+.message.model .text pre::-webkit-scrollbar-thumb:hover {
+  background-color: #9ea5ab; /* 悬浮时滑块颜色变亮 */
+}
+
+/* 
+ * ===================================================================
+ *  代码块复制按钮样式 (V2 - 专业版)
+ * ===================================================================
+ */
+
+/* 
+  1. Wrapper 容器: 
+  - 成为视觉上的代码块主体 (背景、圆角等)
+  - 作为按钮的相对定位父级
+*/
+.code-block-wrapper {
+  position: relative;
+  background-color: #2e3440; /* Nord 主题暗色背景 */
+  border-radius: 8px;
+  margin: 1em 0;
+  padding: 1em; /* 为内部<pre>提供空间 */
+}
+
+/* 
+  2. 内部 <pre> 标签: 
+  - 重置其所有样式，使其透明地存在于 Wrapper 内部
+  - 它的唯一作用是保留代码的格式
+*/
+.message.model .text .code-block-wrapper pre {
+  margin: 0;
+  padding: 0;
+  background-color: transparent;
+  overflow-x: auto; /* 保持代码水平滚动 */
+}
+
+/* 
+  3. 复制按钮:
+  - 绝对定位到 Wrapper 的右上角内部
+  - 默认隐藏，悬浮时出现，交互友好
+*/
+.copy-code-button {
+  position: absolute;
+  top: 0.75em;
+  right: 0.75em;
+  
+  display: flex;
+  align-items: center;
+  gap: 0.5em; /* 图标和文字的间距 */
+
+  padding: 0.35em 0.6em;
+  background-color: rgba(216, 222, 233, 0.1); /* Nord 主题的半透明背景 */
+  color: #d8dee9; /* Nord 主题的文字颜色 */
+  border: 1px solid rgba(216, 222, 233, 0.15);
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+  
+  opacity: 0; /* 默认完全透明 */
+  transform: translateY(-5px); /* 默认向上移动一点 */
+  transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out, background-color 0.2s;
+  z-index: 10;
+}
+
+/* 
+  4. 交互效果:
+  - 当鼠标悬浮在【整个代码块】上时，按钮平滑地浮现出来
+*/
+.code-block-wrapper:hover .copy-code-button {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.copy-code-button:hover {
+  background-color: rgba(216, 222, 233, 0.25);
+}
+
+.copy-code-button:active {
+  background-color: rgba(216, 222, 233, 0.3);
+}
+
+/* 
+  5. 复制成功状态:
+  - 按钮背景变绿，文字和图标变白
+*/
+.copy-code-button.copied {
+  background-color: #5e81ac; /* Nord 主题的蓝色，表示成功 */
+  border-color: #5e81ac;
+  color: #eceff4;
+}
+
+.copy-code-button .copy-text {
+  line-height: 1; /* 确保文字垂直居中 */
 }
 </style>
