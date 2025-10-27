@@ -99,6 +99,7 @@
 import { ref, nextTick, onMounted, onUnmounted } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import type { Tokens } from 'marked';
 
 // --- 新增：价格和汇率配置 ---
 // 价格来源: Google AI Platform 定价 (USD per 1 million tokens)
@@ -204,17 +205,18 @@ const autoResizeTextarea = (event: Event) => {
   }
 };
 
-// --- 新增：为 marked 创建自定义渲染器 ---
+// --- 为 marked 创建并配置自定义渲染器 ---
 const renderer = new marked.Renderer();
 const originalCodeRenderer = renderer.code; // 保存原始的 code 渲染器
 
-renderer.code = function(code, lang, isEscaped) {
-  const rawCodeBlock = originalCodeRenderer.call(this, code, lang, isEscaped);
+// 最终正确的签名：函数接收一个完整的 Tokens.Code 对象
+renderer.code = function(codeToken: Tokens.Code) {
+  // 关键修正：将接收到的【原始 codeToken 对象】完整地传回给原始渲染器
+  const rawCodeBlock = originalCodeRenderer.call(this, codeToken);
   
-  // 新增：更丰富的按钮HTML，包含一个用于显示文本的<span>
   const copyButton = `
     <button class="copy-code-button" title="Copy code">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
       <span class="copy-text">Copy</span>
     </button>
   `;
@@ -222,7 +224,7 @@ renderer.code = function(code, lang, isEscaped) {
   return `<div class="code-block-wrapper">${copyButton}${rawCodeBlock}</div>`;
 };
 
-// --- 使用我们的自定义渲染器 ---
+// --- 告诉 marked 使用我们配置好的渲染器 ---
 marked.use({ renderer });
 
 // 安全地渲染 Markdown (无需修改)
