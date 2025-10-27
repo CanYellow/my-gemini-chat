@@ -56,6 +56,15 @@ my-gemini-chat/
         *   `npm install --prefix frontend`: 进入 `frontend` 目录，安装其 `package.json` 中定义的依赖。
     *   该脚本确保所有三个层级的 `node_modules` 目录都被正确填充，使项目处于可运行状态。
 
+*   **安全**: 必须在 backend 目录下面建立 .env 文件，里面添加项目敏感信息。
+    ```shell
+    API_KEY="XXXXXXXX"
+    API_HOST="XXXXXXX"
+    PORT=3000
+    FRONTEND_ORIGIN="http://localhost:5173"
+    ```
+
+
 #### 3.2. 全栈开发模式 (日常开发推荐)
 
 此模式同时启动后端服务和前端开发服务器，为全栈开发提供无缝体验。
@@ -171,6 +180,25 @@ my-gemini-chat/
 ```
 *   `backend` 的 `build` 脚本 (`tsc`) 将 TypeScript 编译为 JavaScript，并输出到 `dist` 目录（由 `tsconfig.json` 的 `outDir` 选项定义）。
 *   `backend` 的 `prod` 脚本用于在生产中运行编译后的代码。
+
+**安全**: 必须在 backend 目录下面建立 .env 文件，里面添加项目敏感信息。
+
+    ```shell
+    API_KEY="XXXXXXXX"
+    API_HOST="XXXXXXX"
+    PORT=3000
+    FRONTEND_ORIGIN="http://localhost:5173"
+    ```
+  
+**安全**: 必须在 frontend 目录下面建立 .env .local文件，里面添加项目敏感信息。
+
+    ```shell
+    # 请将 "your_super_secret_random_string" 替换成您的真实密钥
+    #  例如，你可以使用密码生成器生成一个32位的随机字符串
+    # 特殊字符需要转义，
+    # 使用 http://localhost:5173/?token=VITE_ACCESS_KEY访问
+    VITE_ACCESS_KEY="XXXXX"
+    	```
 
 #### 3.2. 拉取代码并安装依赖
 
