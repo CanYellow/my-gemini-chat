@@ -58,12 +58,12 @@ my-gemini-chat/
     
 *   **安全**: 必须在 backend 目录下面建立 .env 文件，里面添加项目敏感信息。
 
-	```shell
-	API_KEY="XXXXXXXX"
-	API_HOST="XXXXXXX"
-	PORT=3000
-	FRONTEND_ORIGIN="http://localhost:5173"
-	```
+    ```shell
+    API_KEY="XXXXXXXX"
+    API_HOST="XXXXXXX"
+    PORT=3000
+    FRONTEND_ORIGIN="http://localhost:5173"
+    ```
 
 #### 3.2. 全栈开发模式 (日常开发推荐)
 
@@ -183,13 +183,22 @@ my-gemini-chat/
 
 **安全**: 必须在 backend 目录下面建立 .env 文件，里面添加项目敏感信息。
 
-	```shell
-	API_KEY="XXXXXXXX"
-	API_HOST="XXXXXXX"
-	PORT=3000
-	FRONTEND_ORIGIN="http://localhost:5173"
-	```
+    ```shell
+    API_KEY="XXXXXXXX"
+    API_HOST="XXXXXXX"
+    PORT=3000
+    FRONTEND_ORIGIN="http://localhost:5173"
+    ```
+  
+*   **安全**: 必须在 frontend 目录下面建立 .env .local文件，里面添加项目敏感信息。
 
+    ```shell
+    # 请将 "your_super_secret_random_string" 替换成您的真实密钥
+    #  例如，你可以使用密码生成器生成一个32位的随机字符串
+    # 特殊字符需要转义，
+    # 使用 http://localhost:5173/?token=VITE_ACCESS_KEY访问
+    VITE_ACCESS_KEY="XXXXX"
+    	```
 
 #### 3.2. 拉取代码并安装依赖
 
