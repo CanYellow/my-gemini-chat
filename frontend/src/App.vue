@@ -20,13 +20,22 @@
           <option value="2">最近1轮</option>
           <option value="0">无上下文</option>
         </select>
-        <!-- 在“选择上下文轮次”的 select 后面添加 -->
         <select v-model="selectedFontSize" title="选择字体大小">
           <option value="12px">小</option>
           <option value="13px">默认</option>
           <option value="14px">中</option>
           <option value="16px">大</option>
         </select>
+        <div class="slider-container" title="温度 (Temperature): 控制生成文本的随机性。值越高，回答越具创意性；值越低，回答越趋于确定性。">
+          <label for="temperature">T</label>
+          <input type="range" id="temperature" min="0" max="1" step="0.05" v-model.number="temperature">
+          <span>{{ temperature.toFixed(2) }}</span>
+        </div>
+        <div class="slider-container" title="Top-P: 控制模型从哪些词汇中选择下一个词。例如，0.7 表示模型会从概率总和为 70% 的最可能词汇中进行选择。">
+          <label for="topP">P</label>
+          <input type="range" id="topP" min="0" max="1" step="0.05" v-model.number="topP">
+          <span>{{ topP.toFixed(2) }}</span>
+        </div>
       </div>
     </div>
     <div id="chat-window" ref="chatWindowRef" @scroll="handleScroll">
@@ -175,6 +184,8 @@ const abortController = ref<AbortController | null>(null);
 const showCompletionHint = ref(false);
 const isAuthenticated = ref(false); // 新增：用于控制访问权限
 const selectedFontSize = ref('13px'); // 新增：用于控制全局字体大小
+const temperature = ref(0.1); // 新增：模型温度
+const topP = ref(0.7); // 新增：模型 Top-P
 
 // --- DOM 引用 ---
 const chatWindowRef = ref<HTMLElement | null>(null);
@@ -338,6 +349,10 @@ const sendMessage = async () => {
             body: JSON.stringify({
                 model: apiModelName,
                 contents: payloadContents,
+                generationConfig: {
+                  temperature: temperature.value,
+                  topP: topP.value,
+                }
             }),
             signal: abortController.value.signal,
         });
@@ -1021,5 +1036,29 @@ h1 {
 
 .copy-code-button .copy-text {
   line-height: 1; /* 确保文字垂直居中 */
+}
+
+/* --- 新增：参数滑块样式 --- */
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.slider-container label {
+  font-weight: bold;
+  font-size: 0.9em;
+  color: #555;
+}
+.slider-container input[type="range"] {
+  width: 60px;
+  margin: 0;
+  cursor: pointer;
+}
+.slider-container span {
+  font-size: 0.85em;
+  min-width: 28px;
+  text-align: right;
+  font-family: monospace;
+  color: #333;
 }
 </style>
