@@ -7,6 +7,7 @@
       <div id="settings">
         <!-- 注意：模型名称已更新以匹配价格表中的键名 -->
 		<select v-model="selectedModel">
+		  <option value="gemini-3-pro-preview">Gemini 3-Pro-Preview</option>
 		  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
 		  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
 		</select>
@@ -16,6 +17,7 @@
           <option value="12">最近6轮</option>
           <option value="8">最近4轮</option>
           <option value="4">最近2轮</option>
+          <option value="2">最近1轮</option>
           <option value="0">无上下文</option>
         </select>
         <!-- 在“选择上下文轮次”的 select 后面添加 -->
@@ -105,6 +107,18 @@ import type { Tokens } from 'marked';
 // 价格来源: Google AI Platform 定价 (USD per 1 million tokens)
 // 注意：这里我们只处理了“标准”使用场景下的文本输入定价。
 const MODEL_PRICING = {
+  'gemini-3-pro-preview': {
+    // 价格分层，以输入 token 数为依据
+    tier1: {
+      threshold: 200000, // 阈值：<= 200k tokens
+      input: 2.00,
+      output: 12.00,
+    },
+    tier2: { // > 200k tokens
+      input: 4.00,
+      output: 18.00,
+    },
+  },
   'gemini-2.5-pro': {
     // 价格分层，以输入 token 数为依据
     tier1: {
@@ -126,6 +140,7 @@ const MODEL_PRICING = {
 
 // 兼容旧的模型名称，映射到新的
 const MODEL_NAME_MAPPING: { [key: string]: keyof typeof MODEL_PRICING } = {
+  'gemini-3-pro-preview': 'gemini-2.5-pro',
   'gemini-2.5-pro': 'gemini-2.5-pro',
   'gemini-2.5-flash': 'gemini-2.5-flash',
 }
@@ -255,7 +270,17 @@ const calculateCost = (model: keyof typeof MODEL_PRICING, inputTokens: number, o
       inputPrice = modelPricingInfo.tier2.input;
       outputPrice = modelPricingInfo.tier2.output;
     }
-  } else if ('input' in modelPricingInfo) { // 处理像 Flash 这样的固定价格模型
+  } 
+  if (model === 'gemini-3-pro-preview' && 'tier1' in modelPricingInfo) {
+    if (inputTokens <= modelPricingInfo.tier1.threshold) {
+      inputPrice = modelPricingInfo.tier1.input;
+      outputPrice = modelPricingInfo.tier1.output;
+    } else {
+      inputPrice = modelPricingInfo.tier2.input;
+      outputPrice = modelPricingInfo.tier2.output;
+    }
+  } 
+else if ('input' in modelPricingInfo) { // 处理像 Flash 这样的固定价格模型
     inputPrice = modelPricingInfo.input;
     outputPrice = modelPricingInfo.output;
   }
