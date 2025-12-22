@@ -14,6 +14,26 @@ const currentGeneratingMessageId = ref<string | null>(null);
 const abortController = ref<AbortController | null>(null);
 const apiService = new ChatApiService(import.meta.env.VITE_API_BASE_URL || '');
 
+// --- Compact Export Types ---
+// [id, role(0/1), text, parentId, childrenIds, selectedChildIndex, timestamp, meta?]
+type RoleEnum = 0 | 1; // 0: user, 1: model
+type CompactMessage = [
+  string,          // 0: id
+  RoleEnum,        // 1: role
+  string,          // 2: text content
+  string | null,   // 3: parentId
+  string[],        // 4: childrenIds
+  number,          // 5: selectedChildIndex
+  number,          // 6: timestamp
+  Record<string, any>? // 7: metadata (optional)
+];
+
+interface CompactExport {
+  v: number;        // Version
+  r: string | null; // Root ID
+  d: CompactMessage[]; // Data
+}
+
 export function useChat() {
   
   // Computed property to reconstruct the linear conversation history based on selected branches
@@ -254,6 +274,100 @@ export function useChat() {
     }
   };
 
+  /**
+   * Serializes the entire chat history into a highly compact JSON string.
+   * Structure: { v: 1, r: rootId, d: [Array of CompactMessage] }
+   */
+  const exportState = (): string => {
+    if (!rootId.value) return '';
+    
+    const messages: CompactMessage[] = [];
+    
+    for (const msg of messageMap.values()) {
+        const role: RoleEnum = msg.role === 'user' ? 0 : 1;
+        
+        // Metadata: compact short keys
+        const meta: Record<string, any> = {};
+        if (msg.inputTokens) meta.it = msg.inputTokens;
+        if (msg.outputTokens) meta.ot = msg.outputTokens;
+        if (msg.inputCost) meta.ic = msg.inputCost;
+        if (msg.outputCost) meta.oc = msg.outputCost;
+        if (msg.collapsed) meta.c = 1;
+        
+        const compact: CompactMessage = [
+            msg.id,
+            role,
+            msg.parts[0].text,
+            msg.parentId,
+            msg.childrenIds,
+            msg.selectedChildIndex,
+            msg.timestamp,
+        ];
+        
+        if (Object.keys(meta).length > 0) {
+            compact.push(meta);
+        }
+        
+        messages.push(compact);
+    }
+
+    const exportData: CompactExport = {
+        v: 1,
+        r: rootId.value,
+        d: messages
+    };
+    
+    return JSON.stringify(exportData);
+  };
+
+  /**
+   * Restores chat history from a JSON string.
+   */
+  const importState = (json: string) => {
+      try {
+          const data = JSON.parse(json) as CompactExport;
+          // Simple version check
+          if (data.v !== 1) throw new Error('Unsupported file version');
+          if (!data.d || !Array.isArray(data.d)) throw new Error('Invalid data format');
+          
+          // Clear current state
+          messageMap.clear();
+          rootId.value = null;
+          
+          data.d.forEach(m => {
+              // Destructure compact array
+              const [id, roleEnum, text, parentId, childrenIds, selectedChildIndex, timestamp, meta] = m;
+              
+              const msg: Message = {
+                  id,
+                  role: roleEnum === 0 ? 'user' : 'model',
+                  parts: [{ text }],
+                  parentId,
+                  childrenIds,
+                  selectedChildIndex,
+                  timestamp,
+                  // Rehydrate metadata
+                  inputTokens: meta?.it,
+                  outputTokens: meta?.ot,
+                  inputCost: meta?.ic,
+                  outputCost: meta?.oc,
+                  collapsed: !!meta?.c,
+                  // Recalculate basic chars for UI
+                  sentChars: roleEnum === 0 ? text.length : undefined,
+                  receivedChars: roleEnum === 1 ? text.length : undefined
+              };
+              
+              messageMap.set(id, msg);
+          });
+          
+          rootId.value = data.r;
+          
+      } catch (e) {
+          console.error('Import failed', e);
+          throw e; // Propagate to UI
+      }
+  };
+
   return {
     conversationHistory,
     isLoading,
@@ -263,6 +377,8 @@ export function useChat() {
     deleteMessage,
     createBranch,
     switchBranch,
-    navigateToMessage
+    navigateToMessage,
+    exportState,
+    importState
   };
 }

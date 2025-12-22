@@ -12,6 +12,24 @@
     </div>
 
     <div class="header-actions">
+      <!-- Data Management -->
+      <div class="data-controls">
+         <button class="icon-btn" @click="triggerFileUpload" title="导入聊天记录">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        </button>
+        <button class="icon-btn" @click="$emit('export')" title="导出聊天记录">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        </button>
+        <!-- Hidden Input -->
+        <input 
+          type="file" 
+          ref="fileInputRef" 
+          accept=".json" 
+          style="display:none" 
+          @change="handleFileChange"
+        />
+      </div>
+
       <!-- Global Collapse Controls -->
       <div class="collapse-controls">
         <button class="icon-btn" @click="$emit('collapseAll')" title="折叠所有历史消息">
@@ -44,18 +62,45 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue';
+
 defineProps<{
   title: string;
   fontSize: string;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'update:title', val: string): void;
   (e: 'update:fontSize', val: string): void;
   (e: 'openSettings'): void;
   (e: 'collapseAll'): void;
   (e: 'expandAll'): void;
+  (e: 'export'): void;
+  (e: 'restore', jsonContent: string): void;
 }>();
+
+const fileInputRef = ref<HTMLInputElement | null>(null);
+
+const triggerFileUpload = () => {
+  fileInputRef.value?.click();
+};
+
+const handleFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target?.result as string;
+    if (content) {
+      emit('restore', content);
+    }
+    // Reset input so same file can be selected again if needed
+    if (fileInputRef.value) fileInputRef.value.value = '';
+  };
+  reader.readAsText(file);
+};
 </script>
 
 <style scoped>
@@ -119,7 +164,7 @@ defineEmits<{
   gap: 15px;
 }
 
-.collapse-controls {
+.data-controls, .collapse-controls {
   display: flex;
   gap: 5px;
   border-right: 1px solid #eee;

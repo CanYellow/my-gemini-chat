@@ -8,6 +8,8 @@
         @openSettings="showSettings = true"
         @collapseAll="handleGlobalCollapse"
         @expandAll="handleGlobalExpand"
+        @export="handleExport"
+        @restore="handleImport"
       />
 
       <div id="chat-window" ref="chatWindowRef" @scroll="handleScroll" @click="handleCopyClick">
@@ -70,7 +72,9 @@ const {
   sendMessage, 
   stopGeneration, 
   deleteMessage,
-  navigateToMessage
+  navigateToMessage,
+  exportState,
+  importState
 } = useChat();
 const { settings } = useSettings();
 
@@ -194,6 +198,40 @@ const handleGlobalExpand = () => {
   conversationHistory.value.forEach(msg => {
     msg.collapsed = false;
   });
+};
+
+const handleExport = () => {
+  const jsonStr = exportState();
+  if (!jsonStr) {
+    alert("没有可导出的聊天记录。");
+    return;
+  }
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `chat-history-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const handleImport = (jsonStr: string) => {
+  if (isLoading.value) {
+    alert("生成过程中无法导入。");
+    return;
+  }
+  if (!confirm("导入将覆盖当前所有聊天记录，确定继续吗？")) {
+    return;
+  }
+  
+  try {
+    importState(jsonStr);
+    scrollToBottom(true);
+  } catch (e) {
+    alert("导入失败：文件格式不正确或已损坏。");
+  }
 };
 
 const onSend = (text: string) => {
