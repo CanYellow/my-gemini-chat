@@ -15,31 +15,80 @@
       <div v-if="isCollapsed" class="collapse-overlay"></div>
     </div>
 
-    <div class="message-footer">
-      <div class="meta-info">
-        <div v-if="message.sentChars !== undefined || message.receivedChars !== undefined" class="token-info">
-          <span v-if="message.sentChars !== undefined">发送: {{ message.sentChars }}字</span>
-          <span v-if="message.receivedChars !== undefined" class="received-chars">接收: {{ message.receivedChars }}字</span>
+    <!-- Branch Navigation Bar -->
+    <div v-if="showBranchNav" class="branch-nav">
+      <div class="branch-separator"></div>
+      <div class="branch-controls">
+        <button 
+          class="nav-btn" 
+          :disabled="currentBranchIndex <= 1"
+          @click="prevBranch"
+          title="上一分支"
+        >
+          &lt;
+        </button>
+        
+        <div class="page-indicator">
+          <input 
+            type="text" 
+            v-model="pageInput" 
+            @keydown.enter="handlePageJump" 
+            @blur="resetPageInput"
+            class="page-input"
+          />
+          <span class="total-pages">/ {{ totalBranches }}</span>
         </div>
         
-        <div v-if="message.inputTokens !== undefined" class="token-info cost-info">
-          <span title="输入 Token">In: {{ message.inputTokens }}</span>
-          <span title="输出 Token">Out: {{ message.outputTokens }}</span>
+        <button 
+          class="nav-btn" 
+          :disabled="currentBranchIndex >= totalBranches"
+          @click="nextBranch"
+          title="下一分支"
+        >
+          &gt;
+        </button>
+      </div>
+    </div>
+
+    <div class="message-footer">
+      <!-- Meta Info -->
+      <div class="meta-info">
+        <div v-if="message.sentChars !== undefined || message.receivedChars !== undefined" class="token-info">
+          <span v-if="message.sentChars !== undefined">{{ message.sentChars }}字</span>
+          <span v-if="message.receivedChars !== undefined" class="received-chars">{{ message.receivedChars }}字</span>
+        </div>
+        
+        <div v-if="message.inputTokens !== undefined" class="token-info">
+          <span title="In">In:{{ message.inputTokens }}</span>
+          <span title="Out">Out:{{ message.outputTokens }}</span>
+        </div>
+
+        <div v-if="totalCostDisplay" class="cost-info">
+          <span>${{ totalCostDisplay }}</span>
         </div>
       </div>
 
+      <!-- Actions -->
       <div class="actions">
+        <!-- Branch Button: ALWAYS visible. Creates a new branch with THIS message as parent. -->
         <button 
-          v-if="canCollapse"
+          class="action-btn branch-btn" 
+          @click="handleCreateBranch" 
+          title="新建分支 (Create Branch)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+        </button>
+
+        <button 
           class="action-btn toggle-btn" 
           @click="toggleCollapse" 
           :title="isCollapsed ? '展开' : '折叠'"
         >
-          <span v-if="isCollapsed">▼ 展开</span>
-          <span v-else>▲ 折叠</span>
+          <span v-if="isCollapsed">▼</span>
+          <span v-else>▲</span>
         </button>
 
-        <button class="action-btn delete-btn" @click="$emit('delete')" title="删除消息">
+        <button class="action-btn delete-btn" @click="$emit('delete', message.id)" title="删除消息">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
       </div>
@@ -52,11 +101,14 @@ import { computed, ref, onMounted, watch, nextTick } from 'vue';
 import type { Message } from '../../types';
 import { renderMarkdown } from '../../utils/markdown';
 import { useSettings } from '../../composables/useSettings';
+import { useChat } from '../../composables/useChat';
 
 const props = defineProps<{ message: Message }>();
-const emit = defineEmits<{ (e: 'delete'): void }>();
+const emit = defineEmits<{ (e: 'delete', id: string): void }>();
 
 const { settings } = useSettings();
+const { createBranch, switchBranch } = useChat();
+
 const contentRef = ref<HTMLElement | null>(null);
 const isOverflowing = ref(false);
 
@@ -64,41 +116,79 @@ const renderedContent = computed(() => {
   return renderMarkdown(props.message.parts[0].text);
 });
 
-// Check if content height exceeds the threshold
+const totalCostDisplay = computed(() => {
+  const inCost = props.message.inputCost || 0;
+  const outCost = props.message.outputCost || 0;
+  const total = inCost + outCost;
+  return total > 0 ? total.toFixed(6) : null;
+});
+
+// Branch Navigation Logic
+const hasChildren = computed(() => props.message.childrenIds.length > 0);
+const isDrafting = computed(() => props.message.selectedChildIndex >= props.message.childrenIds.length);
+
+const showBranchNav = computed(() => props.message.childrenIds.length > 1 || (hasChildren.value && isDrafting.value));
+
+const currentBranchIndex = computed(() => props.message.selectedChildIndex + 1);
+const totalBranches = computed(() => props.message.childrenIds.length);
+
+const pageInput = ref(currentBranchIndex.value.toString());
+
+watch(currentBranchIndex, (newVal) => {
+  pageInput.value = newVal.toString();
+});
+
+const prevBranch = () => {
+  if (currentBranchIndex.value > 1) {
+    switchBranch(props.message.id, props.message.selectedChildIndex - 1);
+  }
+};
+
+const nextBranch = () => {
+  if (currentBranchIndex.value < totalBranches.value) {
+    switchBranch(props.message.id, props.message.selectedChildIndex + 1);
+  }
+};
+
+const handleCreateBranch = () => {
+  // Use THIS message as the parent for the new branch
+  createBranch(props.message.id);
+};
+
+const handlePageJump = () => {
+  const val = parseInt(pageInput.value, 10);
+  if (!isNaN(val) && val >= 1 && val <= totalBranches.value) {
+    switchBranch(props.message.id, val - 1);
+  } else {
+    pageInput.value = currentBranchIndex.value.toString();
+  }
+};
+
+const resetPageInput = () => {
+   pageInput.value = currentBranchIndex.value.toString();
+};
+
 const checkOverflow = () => {
   if (!contentRef.value) return;
-  // Calculate max height in pixels: threshold lines * 1.6em line-height * 13px base font (approx)
-  // We use CSS logic for the constraint, here we just check if scrollHeight is significantly larger than expected collapsed height
-  // A rough estimate or letting CSS handle the visual and JS handle the button availability.
-  // Better: Apply the collapsed class tentatively to measure? No.
-  // Let's assume line-height is 1.6em.
   const lineHeightEm = 1.6;
-  // We can't easily get exact pixel height of 'em' without computing style, but we can approximate or use ResizeObserver.
-  // Let's use a simpler heuristic: Measure full height vs Max height.
-  
   const fullHeight = contentRef.value.scrollHeight;
   const fontSize = parseFloat(getComputedStyle(contentRef.value).fontSize || '13');
   const maxAllowedHeight = settings.collapseThreshold * lineHeightEm * fontSize;
   
-  isOverflowing.value = fullHeight > maxAllowedHeight + 10; // +10px buffer
+  isOverflowing.value = fullHeight > maxAllowedHeight + 10;
 };
 
-// Re-check on content change or setting change
 watch(() => [props.message.parts[0].text, settings.collapseThreshold], () => {
   nextTick(checkOverflow);
 }, { flush: 'post' });
 
 onMounted(() => {
-  // Add a small delay to ensure images/layout render (though pure text is fast)
   setTimeout(checkOverflow, 100);
 });
 
-// Sync prop state
 const isCollapsed = computed(() => {
   return props.message.collapsed && isOverflowing.value;
 });
-
-const canCollapse = computed(() => isOverflowing.value);
 
 const toggleCollapse = () => {
   props.message.collapsed = !props.message.collapsed;
@@ -112,47 +202,79 @@ const collapsedStyle = computed(() => {
 });
 </script>
 
+<style scoped>
+/* Branch Nav Styles */
+.branch-nav {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+.branch-separator {
+  width: 100%; height: 1px; background-color: #e0e0e0; margin-bottom: 6px; position: relative;
+}
+.branch-controls {
+  display: flex; align-items: center; gap: 10px; background-color: #f8f9fa;
+  padding: 2px 10px; border-radius: 12px; border: 1px solid #eee; font-size: 0.85em; color: #666;
+}
+.nav-btn {
+  background: none; border: none; cursor: pointer; color: #555;
+  font-weight: bold; padding: 2px 6px; border-radius: 4px;
+}
+.nav-btn:hover:not(:disabled) { background-color: #e2e6ea; color: #007bff; }
+.nav-btn:disabled { color: #ccc; cursor: default; }
+.page-indicator { display: flex; align-items: center; gap: 4px; font-family: monospace; }
+.page-input {
+  width: 24px; text-align: center; border: 1px solid transparent; 
+  background: transparent; font-family: inherit; font-size: 1em; color: #333; padding: 0;
+}
+.page-input:focus { border-bottom: 1px solid #007bff; outline: none; }
+.total-pages { color: #999; }
+</style>
+
 <style>
-/* Global styles for markdown content are needed since v-html injects it */
-.message { display: flex; flex-direction: column; margin-bottom: 15px; max-width: 95%; }
-.message .role { font-weight: bold; font-size: 0.85em; margin-bottom: 4px; color: #555; }
+/* Global styles for markdown content */
+.message { 
+  display: flex; flex-direction: column; margin-bottom: 15px; 
+  max-width: 95%; text-align: left;
+}
+.message .role { 
+  font-weight: bold; font-size: 0.85em; margin-bottom: 4px; color: #555; width: 100%;
+}
 
-/* Wrapper for collapse functionality */
+/* Wrapper for collapse */
 .content-wrapper {
-  position: relative;
-  border-radius: 16px;
-  background-color: transparent;
-  transition: max-height 0.3s ease;
+  position: relative; border-radius: 16px; background-color: transparent; transition: max-height 0.3s ease;
 }
+.content-inner { overflow: hidden; }
 
-.content-inner {
-  overflow: hidden;
-}
-
-/* User Message specific */
+/* User Message */
 .message.user .content-wrapper { align-self: flex-end; }
+.message.user .role { text-align: right; }
 .message.user .text { 
-  background: #007bff; color: white; padding: 10px 15px; border-radius: 16px; border-bottom-right-radius: 4px; 
-  white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; line-height: 1.6;
+  background: #007bff; color: white; padding: 10px 15px; 
+  border-radius: 16px; border-bottom-right-radius: 4px; 
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; 
+  line-height: 1.6; text-align: left;
 }
 
-/* Model Message specific */
+/* Model Message */
 .message.model .content-wrapper { align-self: flex-start; max-width: 100%; }
+.message.model .role { text-align: left; }
 .message.model .text { 
-  background: #e9ecef; color: #333; padding: 10px 15px; border-radius: 16px; border-bottom-left-radius: 4px; 
-  max-width: 100%; overflow-wrap: break-word; word-break: break-all; line-height: 1.6;
+  background: #e9ecef; color: #333; padding: 10px 15px; 
+  border-radius: 16px; border-bottom-left-radius: 4px; 
+  max-width: 100%; overflow-wrap: break-word; word-break: break-all; 
+  line-height: 1.6; text-align: left;
 }
 
 /* Collapsed State */
-.content-wrapper.collapsed .content-inner {
-  max-height: calc(1.6em * var(--max-lines, 5)); 
-}
-
+.content-wrapper.collapsed .content-inner { max-height: calc(1.6em * var(--max-lines, 5)); }
 .content-wrapper.collapsed .collapse-overlay {
   position: absolute; bottom: 0; left: 0; right: 0; height: 40px;
-  border-bottom-left-radius: 4px; border-bottom-right-radius: 16px; /* Model style default */
-  background: linear-gradient(to bottom, rgba(233,236,239,0), rgba(233,236,239,1));
-  pointer-events: none;
+  border-bottom-left-radius: 4px; border-bottom-right-radius: 16px;
+  background: linear-gradient(to bottom, rgba(233,236,239,0), rgba(233,236,239,1)); pointer-events: none;
 }
 .message.user .content-wrapper.collapsed .collapse-overlay {
   border-bottom-left-radius: 16px; border-bottom-right-radius: 4px;
@@ -161,12 +283,22 @@ const collapsedStyle = computed(() => {
 
 /* Footer & Actions */
 .message-footer {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-top: 5px; width: 100%; padding: 0 4px;
+  display: flex; align-items: center; margin-top: 5px; width: 100%; padding: 0 4px; gap: 15px;
+}
+
+/* User Footer: Align Right (Actions on right) */
+.message.user .message-footer {
+  justify-content: flex-end;
+}
+
+/* Model Footer: Align Left (Actions on left) */
+.message.model .message-footer {
+  justify-content: flex-start;
 }
 
 .meta-info { display: flex; flex-direction: row; gap: 10px; font-size: 0.75em; color: #999; }
 .token-info { display: flex; gap: 8px; }
+.cost-info { color: #666; font-weight: 500; }
 
 .actions { display: flex; align-items: center; gap: 4px; opacity: 0; transition: opacity 0.2s; }
 .message:hover .actions { opacity: 1; }
@@ -178,10 +310,11 @@ const collapsedStyle = computed(() => {
 }
 .action-btn:hover { background-color: #f0f0f0; color: #555; }
 .delete-btn:hover { background-color: #fee2e2; color: #dc3545; }
+.branch-btn:hover { background-color: #e0f2f1; color: #009688; }
 .toggle-btn { color: #007bff; font-weight: 500; }
 .toggle-btn:hover { background-color: #e7f1ff; color: #0056b3; }
 
-/* Markdown Styles (Preserved) */
+/* Markdown Styles */
 .message.model .text pre {
   background-color: #282c34; color: #abb2bf; padding: 0.8em; margin: 0.5em 0;
   border-radius: 8px; overflow-x: auto; font-size: 0.9em; white-space: pre;

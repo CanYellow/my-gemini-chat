@@ -6,16 +6,18 @@ import { ChatApiService } from '../services/chatApi';
 // Simple ID generator
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
-// --- Shared State (Singleton) ---
-// This ensures that ChatMessage.vue and App.vue share the SAME data.
-const messageMap = reactive(new Map<string, Message>());
-const rootId = ref<string | null>(null);
-const isLoading = ref(false);
-const abortController = ref<AbortController | null>(null);
-const apiService = new ChatApiService(import.meta.env.VITE_API_BASE_URL || '');
-
 export function useChat() {
+  // We use a Map to store all messages by ID
+  const messageMap = reactive(new Map<string, Message>());
   
+  // Virtual root ID to anchor the first messages
+  const rootId = ref<string | null>(null);
+  
+  const isLoading = ref(false);
+  const abortController = ref<AbortController | null>(null);
+  
+  const apiService = new ChatApiService(import.meta.env.VITE_API_BASE_URL || '');
+
   // Computed property to reconstruct the linear conversation history based on selected branches
   const conversationHistory = computed(() => {
     const history: Message[] = [];
@@ -142,7 +144,6 @@ export function useChat() {
     const parent = messageMap.get(parentId);
     if (parent) {
       // Set selected index to 'length', effectively pointing to a non-existent child (Draft Mode)
-      // This will cause the conversationHistory traversal to stop at this parent
       parent.selectedChildIndex = parent.childrenIds.length;
     }
   };
@@ -183,22 +184,17 @@ export function useChat() {
       parentId: userMsg.id
     });
     
+    // Prepare history for API (all messages leading up to userMsg, inclusive)
+    // conversationHistory now includes [..., parent, userMsg, modelMsg]
+    // We want to send [..., parent, userMsg]
+    // We can just take conversationHistory.value.slice(0, -1) because modelMsg is the last one.
+    
     let isFirstChunk = true;
     let fullText = '';
 
     try {
-      // We pass history excluding the new placeholder model message, but including the new user message?
-      // Wait, apiService expects history. 
-      // conversationHistory now has [..., parent, userMsg, modelMsg]
-      // We want to send [..., parent, userMsg]
-      
-      // IMPORTANT: Recalculate history based on the new state
-      // conversationHistory is reactive, so getting .value gives the current list.
-      const currentHistory = conversationHistory.value;
-      const payloadMessages = currentHistory.slice(0, -1); // Exclude the 'Thinking...' message
-
       await apiService.sendMessageStream(
-        payloadMessages,
+        conversationHistory.value.slice(0, -1),
         config,
         abortController.value.signal,
         {

@@ -13,9 +13,9 @@
       <div id="chat-window" ref="chatWindowRef" @scroll="handleScroll" @click="handleCopyClick">
         <ChatMessage 
           v-for="(msg, index) in conversationHistory" 
-          :key="index" 
+          :key="msg.id" 
           :message="msg" 
-          @delete="handleDelete(index)"
+          @delete="handleDelete"
         />
       </div>
 
@@ -116,13 +116,13 @@ const forceScrollToBottom = () => {
 };
 
 // Handlers
-const handleDelete = (index: number) => {
+const handleDelete = (id: string) => {
   if (isLoading.value) {
     alert("请等待生成完成后再删除消息。");
     return;
   }
-  if (confirm('确定要删除这条消息吗？')) {
-    deleteMessage(index);
+  if (confirm('确定要删除这条消息及其后续分支吗？')) {
+    deleteMessage(id);
   }
 };
 
@@ -130,10 +130,7 @@ const handleGlobalCollapse = () => {
   // Collapse all except the last one if it's currently generating (though history implies past)
   // Simple interpretation: Collapse all. User can expand if needed.
   // "Collapse all history messages" implies all past messages.
-  const historyLen = conversationHistory.value.length;
-  conversationHistory.value.forEach((msg, idx) => {
-    // Optionally don't collapse the very last one if it's active, but button says "Collapse All"
-    // Let's collapse everything that can be collapsed.
+  conversationHistory.value.forEach((msg) => {
     msg.collapsed = true;
   });
 };
@@ -173,10 +170,6 @@ const onSend = (text: string) => {
     }
   ).then(() => {
     nextTick(() => inputRef.value?.focus());
-    
-    // Optional: After generation finishes, if we wanted to auto-collapse the just-finished message?
-    // Usually "Auto collapse history" means when I start a NEW turn, the OLD turn collapses.
-    // So the logic at the start of onSend is correct.
   });
 };
 
@@ -228,7 +221,15 @@ body {
   position: relative; /* For modal positioning context if needed, though modal uses fixed */
 }
 
-#chat-window { flex-grow: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; }
+/* Fix text alignment inheritance issue */
+#chat-window { 
+  flex-grow: 1; 
+  overflow-y: auto; 
+  padding: 15px; 
+  display: flex; 
+  flex-direction: column; 
+  text-align: left; 
+}
 
 .completion-hint {
   position: absolute; bottom: 130px; 

@@ -3,8 +3,16 @@ export interface MessagePart {
 }
 
 export interface Message {
+  id: string;
   role: 'user' | 'model';
   parts: [MessagePart, ...MessagePart[]];
+  
+  // Tree structure
+  parentId: string | null;
+  childrenIds: string[];
+  selectedChildIndex: number; // The index in childrenIds that is currently active
+
+  // Metadata
   sentChars?: number;
   receivedChars?: number;
   inputTokens?: number;
@@ -12,6 +20,7 @@ export interface Message {
   inputCost?: number;
   outputCost?: number;
   collapsed?: boolean;
+  timestamp: number;
 }
 
 export interface ModelPricingTier {
