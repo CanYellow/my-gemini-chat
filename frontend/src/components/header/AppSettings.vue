@@ -1,75 +1,145 @@
 <template>
   <div id="header">
-    <h1>我的 Gemini 客户端</h1>
-    <div id="settings">
-      <select :value="model" @input="$emit('update:model', ($event.target as HTMLSelectElement).value as any)">
-        <option value="gemini-3-pro-preview">Gemini 3-Pro-Preview</option>
-        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-      </select>
+    <div class="title-container">
+      <input 
+        type="text" 
+        :value="title" 
+        @input="$emit('update:title', ($event.target as HTMLInputElement).value)"
+        class="editable-title"
+        placeholder="输入标题..."
+      />
+      <span class="edit-icon">✎</span>
+    </div>
 
-      <select :value="contextLength" @input="$emit('update:contextLength', ($event.target as HTMLSelectElement).value)" title="选择上下文轮次">
-        <option value="all">全部对话</option>
-        <option value="20">最近10轮</option>
-        <option value="12">最近6轮</option>
-        <option value="8">最近4轮</option>
-        <option value="4">最近2轮</option>
-        <option value="2">最近1轮</option>
-        <option value="0">无上下文</option>
-      </select>
-
-      <select :value="fontSize" @input="$emit('update:fontSize', ($event.target as HTMLSelectElement).value)" title="选择字体大小">
-        <option value="12px">小</option>
-        <option value="13px">默认</option>
-        <option value="14px">中</option>
-        <option value="16px">大</option>
-      </select>
-
-      <div class="slider-container" title="温度 (Temperature)">
-        <label>T</label>
-        <input type="range" min="0" max="1" step="0.05" :value="temperature" @input="$emit('update:temperature', parseFloat(($event.target as HTMLInputElement).value))">
-        <span>{{ temperature.toFixed(2) }}</span>
+    <div class="header-actions">
+      <!-- Global Collapse Controls -->
+      <div class="collapse-controls">
+        <button class="icon-btn" @click="$emit('collapseAll')" title="折叠所有历史消息">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 12 6 20 14"></polyline><line x1="4" y1="20" x2="20" y2="20"></line></svg>
+        </button>
+        <button class="icon-btn" @click="$emit('expandAll')" title="展开所有消息">
+           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 10 12 18 20 10"></polyline><line x1="4" y1="4" x2="20" y2="4"></line></svg>
+        </button>
       </div>
 
-      <div class="slider-container" title="Top-P">
-        <label>P</label>
-        <input type="range" min="0" max="1" step="0.05" :value="topP" @input="$emit('update:topP', parseFloat(($event.target as HTMLInputElement).value))">
-        <span>{{ topP.toFixed(2) }}</span>
+      <div class="view-settings">
+        <select 
+          :value="fontSize" 
+          @input="$emit('update:fontSize', ($event.target as HTMLSelectElement).value)" 
+          title="选择字体大小"
+          class="font-select"
+        >
+          <option value="12px">小字体</option>
+          <option value="13px">默认</option>
+          <option value="14px">中等</option>
+          <option value="16px">大字体</option>
+        </select>
       </div>
+
+      <button class="icon-btn settings-btn" @click="$emit('openSettings')" title="全局设置">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { ModelKey } from '../../types';
-
 defineProps<{
-  model: ModelKey;
-  contextLength: string;
+  title: string;
   fontSize: string;
-  temperature: number;
-  topP: number;
 }>();
 
 defineEmits<{
-  (e: 'update:model', val: ModelKey): void;
-  (e: 'update:contextLength', val: string): void;
+  (e: 'update:title', val: string): void;
   (e: 'update:fontSize', val: string): void;
-  (e: 'update:temperature', val: number): void;
-  (e: 'update:topP', val: number): void;
+  (e: 'openSettings'): void;
+  (e: 'collapseAll'): void;
+  (e: 'expandAll'): void;
 }>();
 </script>
 
 <style scoped>
 #header {
-  display: flex; justify-content: space-between; align-items: center; padding: 0 20px;
-  border-bottom: 1px solid #eee; background-color: #fafafa; flex-shrink: 0;
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  padding: 15px 20px;
+  border-bottom: 1px solid #eee; 
+  background-color: #fff; 
+  flex-shrink: 0;
 }
-h1 { font-size: 1.1em; color: #444; margin: 0; padding: 15px 0; }
-#settings { display: flex; align-items: center; gap: 10px; }
-#settings select { padding: 5px 8px; border-radius: 6px; border: 1px solid #ddd; font-size: 0.9em; background-color: #fff; }
-.slider-container { display: flex; align-items: center; gap: 5px; }
-.slider-container label { font-weight: bold; font-size: 0.9em; color: #555; }
-.slider-container input[type="range"] { width: 60px; margin: 0; cursor: pointer; }
-.slider-container span { font-size: 0.85em; min-width: 28px; text-align: right; font-family: monospace; color: #333; }
+
+.title-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.editable-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #333;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 8px;
+  border-radius: 4px;
+  width: 100%;
+  max-width: 300px;
+  transition: all 0.2s;
+  text-overflow: ellipsis;
+}
+
+.editable-title:hover {
+  background-color: #f8f9fa;
+  border-color: #eee;
+}
+
+.editable-title:focus {
+  outline: none;
+  background-color: #fff;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0,123,255,0.1);
+}
+
+.edit-icon {
+  font-size: 0.9rem;
+  color: #ccc;
+  pointer-events: none;
+}
+
+.title-container:hover .edit-icon {
+  color: #999;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.collapse-controls {
+  display: flex;
+  gap: 5px;
+  border-right: 1px solid #eee;
+  padding-right: 15px;
+}
+
+.icon-btn {
+  background: none; border: none; cursor: pointer;
+  padding: 6px; border-radius: 6px; color: #555;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s;
+}
+.icon-btn:hover { background-color: #f0f0f0; color: #007bff; }
+
+.font-select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  font-size: 0.85rem;
+  background-color: #fff;
+  color: #555;
+}
 </style>

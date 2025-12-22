@@ -11,6 +11,7 @@ export interface Message {
   outputTokens?: number;
   inputCost?: number;
   outputCost?: number;
+  collapsed?: boolean;
 }
 
 export interface ModelPricingTier {

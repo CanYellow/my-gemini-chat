@@ -1,12 +1,13 @@
 <template>
   <div id="app" :style="{ '--base-font-size': fontSize }">
     <template v-if="isAuthenticated">
+      <!-- Header with Title, Settings Button and Global Actions -->
       <AppSettings
-        v-model:model="model"
-        v-model:contextLength="contextLength"
+        v-model:title="pageTitle"
         v-model:fontSize="fontSize"
-        v-model:temperature="temperature"
-        v-model:topP="topP"
+        @openSettings="showSettings = true"
+        @collapseAll="handleGlobalCollapse"
+        @expandAll="handleGlobalExpand"
       />
 
       <div id="chat-window" ref="chatWindowRef" @scroll="handleScroll" @click="handleCopyClick">
@@ -22,12 +23,23 @@
         ↓ 新消息
       </button>
 
+      <!-- Settings Bar (Model, Context, etc.) -->
+      <ChatSettings
+        v-model:model="model"
+        v-model:contextLength="contextLength"
+        v-model:temperature="temperature"
+        v-model:topP="topP"
+      />
+
       <ChatInput 
         :isLoading="isLoading" 
         @send="onSend" 
         @stop="stopGeneration" 
         ref="inputRef"
       />
+
+      <!-- Global Settings Modal -->
+      <GlobalSettings v-if="showSettings" @close="showSettings = false" />
     </template>
 
     <AccessDenied v-else />
@@ -35,29 +47,42 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, onMounted, nextTick, watch } from 'vue';
 import { useAuth } from './composables/useAuth';
 import { useChat } from './composables/useChat';
+import { useSettings } from './composables/useSettings';
 import type { ModelKey } from './types';
 
 // Components
 import AppSettings from './components/header/AppSettings.vue';
 import ChatMessage from './components/chat/ChatMessage.vue';
 import ChatInput from './components/chat/ChatInput.vue';
+import ChatSettings from './components/chat/ChatSettings.vue';
 import AccessDenied from './components/auth/AccessDenied.vue';
+import GlobalSettings from './components/settings/GlobalSettings.vue';
 
 // State
 const { isAuthenticated } = useAuth();
 const { conversationHistory, isLoading, sendMessage, stopGeneration, deleteMessage } = useChat();
+const { settings } = useSettings();
 
-// Settings
+// UI State
+const pageTitle = ref('我的 Gemini 客户端');
+const showSettings = ref(false);
+
+// Model Settings
 const model = ref<ModelKey>('gemini-2.5-flash');
-const contextLength = ref('12');
+const contextLength = ref('0');
 const fontSize = ref('13px');
 const temperature = ref(0.1);
 const topP = ref(0.7);
 
-// UI Refs & State
+// Update document title
+watch(pageTitle, (newTitle) => {
+  document.title = newTitle || 'Gemini Client';
+}, { immediate: true });
+
+// UI Refs & Scroll State
 const chatWindowRef = ref<HTMLElement | null>(null);
 const inputRef = ref<InstanceType<typeof ChatInput> | null>(null);
 const showCompletionHint = ref(false);
@@ -92,7 +117,6 @@ const forceScrollToBottom = () => {
 
 // Handlers
 const handleDelete = (index: number) => {
-  // Prevent deletion during loading to avoid state inconsistencies
   if (isLoading.value) {
     alert("请等待生成完成后再删除消息。");
     return;
@@ -102,7 +126,32 @@ const handleDelete = (index: number) => {
   }
 };
 
+const handleGlobalCollapse = () => {
+  // Collapse all except the last one if it's currently generating (though history implies past)
+  // Simple interpretation: Collapse all. User can expand if needed.
+  // "Collapse all history messages" implies all past messages.
+  const historyLen = conversationHistory.value.length;
+  conversationHistory.value.forEach((msg, idx) => {
+    // Optionally don't collapse the very last one if it's active, but button says "Collapse All"
+    // Let's collapse everything that can be collapsed.
+    msg.collapsed = true;
+  });
+};
+
+const handleGlobalExpand = () => {
+  conversationHistory.value.forEach(msg => {
+    msg.collapsed = false;
+  });
+};
+
 const onSend = (text: string) => {
+  // Auto-collapse previous history if enabled
+  if (settings.enableAutoCollapse) {
+    conversationHistory.value.forEach(msg => {
+      msg.collapsed = true;
+    });
+  }
+
   showCompletionHint.value = false;
   shouldAutoScroll.value = true;
   scrollToBottom(true);
@@ -124,6 +173,10 @@ const onSend = (text: string) => {
     }
   ).then(() => {
     nextTick(() => inputRef.value?.focus());
+    
+    // Optional: After generation finishes, if we wanted to auto-collapse the just-finished message?
+    // Usually "Auto collapse history" means when I start a NEW turn, the OLD turn collapses.
+    // So the logic at the start of onSend is correct.
   });
 };
 
@@ -172,12 +225,14 @@ body {
   width: 90%; max-width: 800px; height: 95vh; max-height: 900px; background: #fff;
   border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); display: flex;
   flex-direction: column; overflow: hidden; font-size: var(--base-font-size, 13px);
+  position: relative; /* For modal positioning context if needed, though modal uses fixed */
 }
 
 #chat-window { flex-grow: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; }
 
 .completion-hint {
-  position: absolute; bottom: 75px; left: 50%; transform: translateX(-50%); z-index: 10;
+  position: absolute; bottom: 130px; 
+  left: 50%; transform: translateX(-50%); z-index: 10;
   background-color: #007bff; color: white; border: none; border-radius: 20px; padding: 8px 16px;
   font-size: calc(var(--base-font-size, 13px) - 1px); font-weight: 500; cursor: pointer;
   box-shadow: 0 2px 10px rgba(0,0,0,0.2); transition: opacity 0.3s ease, transform 0.3s ease;
