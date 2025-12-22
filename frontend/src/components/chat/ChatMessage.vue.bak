@@ -53,20 +53,16 @@
     <div class="message-footer">
       <!-- Meta Info -->
       <div class="meta-info">
-        <!-- Character Count (Still preserved as requested) -->
-        <div v-if="message.sentChars !== undefined || message.receivedChars !== undefined" class="char-info">
+        <div v-if="message.sentChars !== undefined || message.receivedChars !== undefined" class="token-info">
           <span v-if="message.sentChars !== undefined">{{ message.sentChars }}字</span>
           <span v-if="message.receivedChars !== undefined" class="received-chars">{{ message.receivedChars }}字</span>
         </div>
         
-        <!-- Token Info (Updated format) -->
         <div v-if="message.inputTokens !== undefined" class="token-info">
-          <span title="Input Tokens">In: {{ message.inputTokens }} tokens</span>
-          <span class="separator">|</span>
-          <span title="Output Tokens">Out: {{ message.outputTokens }} tokens</span>
+          <span title="In">In:{{ message.inputTokens }}</span>
+          <span title="Out">Out:{{ message.outputTokens }}</span>
         </div>
 
-        <!-- Cost Info (Calculated from tokens) -->
         <div v-if="totalCostDisplay" class="cost-info">
           <span>${{ totalCostDisplay }}</span>
         </div>
@@ -287,7 +283,7 @@ const collapsedStyle = computed(() => {
 
 /* Footer & Actions */
 .message-footer {
-  display: flex; align-items: center; margin-top: 5px; width: 100%; padding: 0 4px; gap: 15px; flex-wrap: wrap;
+  display: flex; align-items: center; margin-top: 5px; width: 100%; padding: 0 4px; gap: 15px;
 }
 
 /* User Footer: Align Right (Actions on right) */
@@ -300,10 +296,8 @@ const collapsedStyle = computed(() => {
   justify-content: flex-start;
 }
 
-.meta-info { display: flex; flex-direction: row; gap: 12px; font-size: 0.75em; color: #999; align-items: center; flex-wrap: wrap; }
-.char-info { font-family: sans-serif; }
-.token-info { display: flex; gap: 6px; font-family: monospace; background: #f1f3f5; padding: 2px 6px; border-radius: 4px; }
-.separator { color: #ccc; }
+.meta-info { display: flex; flex-direction: row; gap: 10px; font-size: 0.75em; color: #999; }
+.token-info { display: flex; gap: 8px; }
 .cost-info { color: #666; font-weight: 500; }
 
 .actions { display: flex; align-items: center; gap: 4px; opacity: 0; transition: opacity 0.2s; }

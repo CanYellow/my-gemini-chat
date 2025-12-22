@@ -7,10 +7,10 @@ import { ChatApiService } from '../services/chatApi';
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
 // --- Shared State (Singleton) ---
-// This ensures that ChatMessage.vue and App.vue share the SAME data.
 const messageMap = reactive(new Map<string, Message>());
 const rootId = ref<string | null>(null);
 const isLoading = ref(false);
+const currentGeneratingMessageId = ref<string | null>(null);
 const abortController = ref<AbortController | null>(null);
 const apiService = new ChatApiService(import.meta.env.VITE_API_BASE_URL || '');
 
@@ -29,8 +29,6 @@ export function useChat() {
       history.push(msg);
       
       if (msg.childrenIds.length > 0) {
-        // If selectedChildIndex is within bounds, traverse down
-        // If selectedChildIndex === childrenIds.length, it means we are "drafting" a new branch, so stop here.
         if (msg.selectedChildIndex < msg.childrenIds.length) {
           currentId = msg.childrenIds[msg.selectedChildIndex];
         } else {
@@ -71,11 +69,9 @@ export function useChat() {
       const parent = messageMap.get(parentId);
       if (parent) {
         parent.childrenIds.push(newMessage.id);
-        // Auto-select the new message
         parent.selectedChildIndex = parent.childrenIds.length - 1;
       }
     } else {
-      // If no parent, and no root, make it root
       if (!rootId.value) {
         rootId.value = newMessage.id;
       }
@@ -87,7 +83,6 @@ export function useChat() {
     const msg = messageMap.get(id);
     if (!msg) return;
 
-    // Helper to recursively delete subtree
     const deleteSubtree = (nodeId: string) => {
       const node = messageMap.get(nodeId);
       if (node) {
@@ -96,21 +91,18 @@ export function useChat() {
       }
     };
 
-    // Remove from parent's children
     if (msg.parentId) {
       const parent = messageMap.get(msg.parentId);
       if (parent) {
         const index = parent.childrenIds.indexOf(id);
         if (index !== -1) {
           parent.childrenIds.splice(index, 1);
-          // Adjust selectedChildIndex if needed
           if (parent.selectedChildIndex >= parent.childrenIds.length) {
             parent.selectedChildIndex = Math.max(0, parent.childrenIds.length - 1);
           }
         }
       }
     } else {
-      // If root
       if (rootId.value === id) {
         rootId.value = null;
       }
@@ -119,30 +111,15 @@ export function useChat() {
     deleteSubtree(id);
   };
 
-  const updateLastMessage = (text: string, append = true) => {
-    const history = conversationHistory.value;
-    const lastMsg = history[history.length - 1];
-    if (lastMsg && lastMsg.role === 'model') {
-       if (!append) {
-           lastMsg.parts[0].text = text;
-       } else {
-           lastMsg.parts[0].text += text;
-       }
-    }
-  };
-
   const stopGeneration = () => {
     if (abortController.value) {
       abortController.value.abort();
     }
   };
 
-  // Branching Logic
   const createBranch = (parentId: string) => {
     const parent = messageMap.get(parentId);
     if (parent) {
-      // Set selected index to 'length', effectively pointing to a non-existent child (Draft Mode)
-      // This will cause the conversationHistory traversal to stop at this parent
       parent.selectedChildIndex = parent.childrenIds.length;
     }
   };
@@ -156,14 +133,33 @@ export function useChat() {
     }
   };
 
+  // Navigate to a specific message by updating the selectedChildIndex of all ancestors
+  const navigateToMessage = (targetId: string) => {
+    let curr = messageMap.get(targetId);
+    // We need to trace back from the target to the root
+    // But to update selectedChildIndex, we need to know the path from root? 
+    // Actually, just walking up parents and setting their selectedChildIndex to point to the child on the path is enough.
+    
+    while (curr && curr.parentId) {
+      const parent = messageMap.get(curr.parentId);
+      if (parent) {
+        const index = parent.childrenIds.indexOf(curr.id);
+        if (index !== -1) {
+          parent.selectedChildIndex = index;
+        }
+        curr = parent;
+      } else {
+        break; // Should not happen if tree is consistent
+      }
+    }
+  };
+
   const sendMessage = async (input: string, config: ChatConfig, onStreamUpdate: () => void) => {
     if (!input.trim() || isLoading.value) return;
 
     isLoading.value = true;
     abortController.value = new AbortController();
 
-    // Determine Parent ID
-    // The last message in the CURRENT view is the parent of the new user message.
     const history = conversationHistory.value;
     const parentMsg = history.length > 0 ? history[history.length - 1] : null;
     const parentId = parentMsg ? parentMsg.id : null;
@@ -183,43 +179,55 @@ export function useChat() {
       parentId: userMsg.id
     });
     
+    currentGeneratingMessageId.value = modelMsg.id;
+    
     let isFirstChunk = true;
     let fullText = '';
 
     try {
-      // We pass history excluding the new placeholder model message, but including the new user message?
-      // Wait, apiService expects history. 
-      // conversationHistory now has [..., parent, userMsg, modelMsg]
-      // We want to send [..., parent, userMsg]
-      
-      // IMPORTANT: Recalculate history based on the new state
-      // conversationHistory is reactive, so getting .value gives the current list.
-      const currentHistory = conversationHistory.value;
-      const payloadMessages = currentHistory.slice(0, -1); // Exclude the 'Thinking...' message
+      // Create a snapshot of the conversation path UP TO the user message for the API context
+      // We cannot rely on conversationHistory.value because the user might switch branches immediately.
+      // We must reconstruct the history path for *this* specific branch.
+      const buildHistoryForMsg = (msg: Message): Message[] => {
+        const path: Message[] = [msg];
+        let curr = msg;
+        while (curr.parentId) {
+          const parent = messageMap.get(curr.parentId);
+          if (parent) {
+            path.unshift(parent);
+            curr = parent;
+          } else {
+            break;
+          }
+        }
+        return path;
+      };
+
+      const contextHistory = buildHistoryForMsg(userMsg);
 
       await apiService.sendMessageStream(
-        payloadMessages,
+        contextHistory,
         config,
         abortController.value.signal,
         {
           onChunk: (text) => {
+            // Update the message object DIRECTLY. 
+            // This works regardless of whether the message is currently in the conversationHistory view.
             if (isFirstChunk) {
-              updateLastMessage(text, false);
+              modelMsg.parts[0].text = text;
               isFirstChunk = false;
             } else {
-              updateLastMessage(text, true);
+              modelMsg.parts[0].text += text;
             }
             fullText += text;
             onStreamUpdate();
           },
           onMetadata: (usage) => {
             const { inputCost, outputCost } = calculateCost(config.model, usage.promptTokenCount, usage.candidatesTokenCount);
-            if (modelMsg) {
-                modelMsg.inputTokens = usage.promptTokenCount;
-                modelMsg.outputTokens = usage.candidatesTokenCount;
-                modelMsg.inputCost = inputCost;
-                modelMsg.outputCost = outputCost;
-            }
+            modelMsg.inputTokens = usage.promptTokenCount;
+            modelMsg.outputTokens = usage.candidatesTokenCount;
+            modelMsg.inputCost = inputCost;
+            modelMsg.outputCost = outputCost;
           },
           onError: (err) => { throw err; }
         }
@@ -228,21 +236,20 @@ export function useChat() {
       modelMsg.receivedChars = fullText.length;
 
     } catch (error: any) {
-      if (modelMsg) {
-          if (error.name === 'AbortError') {
-             const stopText = '\n\n**[生成已手动停止]**';
-             if (modelMsg.parts[0].text === '思考中...') {
-                 modelMsg.parts[0].text = '**[生成已手动停止]**';
-             } else {
-                 modelMsg.parts[0].text += stopText;
-             }
-          } else {
-             modelMsg.parts[0].text = `**Error:** ${error.message || 'Unknown error'}`;
-          }
+      if (error.name === 'AbortError') {
+         const stopText = '\n\n**[生成已手动停止]**';
+         if (modelMsg.parts[0].text === '思考中...') {
+             modelMsg.parts[0].text = '**[生成已手动停止]**';
+         } else {
+             modelMsg.parts[0].text += stopText;
+         }
+      } else {
+         modelMsg.parts[0].text = `**Error:** ${error.message || 'Unknown error'}`;
       }
       onStreamUpdate();
     } finally {
       isLoading.value = false;
+      currentGeneratingMessageId.value = null;
       abortController.value = null;
     }
   };
@@ -250,10 +257,12 @@ export function useChat() {
   return {
     conversationHistory,
     isLoading,
+    currentGeneratingMessageId,
     sendMessage,
     stopGeneration,
     deleteMessage,
     createBranch,
-    switchBranch
+    switchBranch,
+    navigateToMessage
   };
 }
