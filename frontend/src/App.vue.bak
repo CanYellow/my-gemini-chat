@@ -96,6 +96,20 @@ const inputRef = ref<InstanceType<typeof ChatInput> | null>(null);
 const showCompletionHint = ref(false);
 const shouldAutoScroll = ref(true);
 
+// Track the ID of a new message that is currently hidden (in another branch)
+const pendingJumpMessageId = ref<string | null>(null);
+
+// Watch conversation history to clear pending jump if the message becomes visible manually
+watch(conversationHistory, (history) => {
+  if (pendingJumpMessageId.value) {
+    const isVisible = history.some(m => m.id === pendingJumpMessageId.value);
+    if (isVisible) {
+      pendingJumpMessageId.value = null;
+      // Re-evaluate auto-scroll logic if needed, but usually manual navigation implies we are where we want to be.
+    }
+  }
+});
+
 // Computed Hint Logic
 const isGeneratingMessageVisible = computed(() => {
   if (!currentGeneratingMessageId.value) return false;
@@ -103,8 +117,9 @@ const isGeneratingMessageVisible = computed(() => {
 });
 
 const hintText = computed(() => {
-  if (currentGeneratingMessageId.value && !isGeneratingMessageVisible.value) {
-    return '↪ 跳转到生成中的分支';
+  // If we have a pending hidden message (either generating or finished), show Jump hint
+  if (pendingJumpMessageId.value) {
+    return '↪ 跳转到新消息分支';
   }
   return '↓ 新消息';
 });
@@ -127,8 +142,10 @@ const handleScroll = () => {
   if (el) {
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     shouldAutoScroll.value = isNearBottom;
-    // Hide hint if we are near bottom AND the message is in this view
-    if (isNearBottom && (!currentGeneratingMessageId.value || isGeneratingMessageVisible.value)) {
+    
+    // Logic to hide hint:
+    // 1. If we are near bottom AND (no hidden message pending OR hidden message is now visible)
+    if (isNearBottom && !pendingJumpMessageId.value) {
       showCompletionHint.value = false;
     }
   }
@@ -140,13 +157,13 @@ const forceScrollToBottom = () => {
 };
 
 const handleHintClick = () => {
-  if (currentGeneratingMessageId.value && !isGeneratingMessageVisible.value) {
+  if (pendingJumpMessageId.value) {
     // Message is in another branch, switch to it
-    navigateToMessage(currentGeneratingMessageId.value);
-    // Wait for DOM update then scroll
+    navigateToMessage(pendingJumpMessageId.value);
+    
+    // Wait for DOM update (branch switch) then scroll
     nextTick(() => {
       forceScrollToBottom();
-      // Ensure we stick to bottom for subsequent chunks
       shouldAutoScroll.value = true;
     });
   } else {
@@ -188,6 +205,7 @@ const onSend = (text: string) => {
 
   showCompletionHint.value = false;
   shouldAutoScroll.value = true;
+  pendingJumpMessageId.value = null; // Reset pending jump
   scrollToBottom(true);
 
   sendMessage(
@@ -210,6 +228,11 @@ const onSend = (text: string) => {
          // Generating message is NOT in view (user switched branch)
          // Always show hint so they can jump back
          showCompletionHint.value = true;
+         
+         // Capture the ID so we can jump to it even after generation finishes
+         if (currentGeneratingMessageId.value) {
+            pendingJumpMessageId.value = currentGeneratingMessageId.value;
+         }
        }
     }
   ).then(() => {

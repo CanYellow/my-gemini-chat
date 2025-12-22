@@ -12,7 +12,7 @@
 
       <div id="chat-window" ref="chatWindowRef" @scroll="handleScroll" @click="handleCopyClick">
         <ChatMessage 
-          v-for="(msg, index) in conversationHistory" 
+          v-for="msg in conversationHistory" 
           :key="msg.id" 
           :message="msg" 
           @delete="handleDelete"

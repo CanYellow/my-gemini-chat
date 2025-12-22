@@ -67,8 +67,9 @@
         </div>
 
         <!-- Cost Info (Calculated from tokens) -->
-        <div v-if="totalCostDisplay" class="cost-info">
-          <span>${{ totalCostDisplay }}</span>
+        <div v-if="costDisplay" class="cost-info">
+          <span title="USD">${{ costDisplay.usd }}</span>
+          <span class="cost-cny" title="CNY (Estimated)"> (¥{{ costDisplay.cny }})</span>
         </div>
       </div>
 
@@ -106,12 +107,14 @@ import type { Message } from '../../types';
 import { renderMarkdown } from '../../utils/markdown';
 import { useSettings } from '../../composables/useSettings';
 import { useChat } from '../../composables/useChat';
+import { useExchangeRate } from '../../composables/useExchangeRate';
 
 const props = defineProps<{ message: Message }>();
 const emit = defineEmits<{ (e: 'delete', id: string): void }>();
 
 const { settings } = useSettings();
 const { createBranch, switchBranch } = useChat();
+const { effectiveRate } = useExchangeRate();
 
 const contentRef = ref<HTMLElement | null>(null);
 const isOverflowing = ref(false);
@@ -120,11 +123,19 @@ const renderedContent = computed(() => {
   return renderMarkdown(props.message.parts[0].text);
 });
 
-const totalCostDisplay = computed(() => {
+const costDisplay = computed(() => {
   const inCost = props.message.inputCost || 0;
   const outCost = props.message.outputCost || 0;
-  const total = inCost + outCost;
-  return total > 0 ? total.toFixed(6) : null;
+  const totalUSD = inCost + outCost;
+  
+  if (totalUSD <= 0) return null;
+
+  const totalCNY = totalUSD * effectiveRate.value;
+
+  return {
+    usd: totalUSD.toFixed(6),
+    cny: totalCNY.toFixed(6)
+  };
 });
 
 // Branch Navigation Logic
@@ -304,7 +315,8 @@ const collapsedStyle = computed(() => {
 .char-info { font-family: sans-serif; }
 .token-info { display: flex; gap: 6px; font-family: monospace; background: #f1f3f5; padding: 2px 6px; border-radius: 4px; }
 .separator { color: #ccc; }
-.cost-info { color: #666; font-weight: 500; }
+.cost-info { color: #666; font-weight: 500; display: flex; gap: 4px; }
+.cost-cny { color: #888; }
 
 .actions { display: flex; align-items: center; gap: 4px; opacity: 0; transition: opacity 0.2s; }
 .message:hover .actions { opacity: 1; }

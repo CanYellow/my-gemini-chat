@@ -36,6 +36,44 @@
             >
           </div>
         </div>
+
+        <div class="setting-divider"></div>
+
+        <div class="setting-section-title">汇率设置 (USD -> CNY)</div>
+
+        <div class="setting-item">
+          <div class="setting-label">
+            <label>汇率来源优先</label>
+            <span class="setting-desc">选择优先使用公开 API 还是自定义汇率。</span>
+          </div>
+          <div class="setting-control radio-group">
+            <label class="radio-label">
+              <input type="radio" value="api" v-model="settings.exchangeRateSource">
+              <span>公开 API</span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" value="custom" v-model="settings.exchangeRateSource">
+              <span>自定义</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">
+            <label for="custom-rate">自定义/备用 汇率</label>
+            <span class="setting-desc">如果 API 失败或选择自定义优先，将使用此值。</span>
+          </div>
+          <div class="setting-control">
+            <input 
+              type="number" 
+              id="custom-rate" 
+              v-model.number="settings.customExchangeRate" 
+              step="0.01" 
+              min="0" 
+              class="number-input wide"
+            >
+          </div>
+        </div>
       </div>
 
       <div class="settings-footer">
@@ -64,18 +102,20 @@ const { settings } = useSettings();
   background: white; width: 90%; max-width: 450px;
   border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.2);
   display: flex; flex-direction: column; overflow: hidden;
+  max-height: 90vh;
 }
 
 .settings-header {
   padding: 15px 20px; border-bottom: 1px solid #eee;
   display: flex; justify-content: space-between; align-items: center;
   background-color: #f8f9fa;
+  flex-shrink: 0;
 }
 .settings-header h3 { margin: 0; font-size: 1.1em; color: #333; }
 .close-btn { background: none; border: none; font-size: 1.2em; color: #666; cursor: pointer; padding: 0 5px; }
 .close-btn:hover { color: #000; }
 
-.settings-body { padding: 20px; }
+.settings-body { padding: 20px; overflow-y: auto; }
 
 .setting-item {
   display: flex; justify-content: space-between; align-items: center;
@@ -83,7 +123,10 @@ const { settings } = useSettings();
 }
 .setting-item:last-child { margin-bottom: 0; }
 
-.setting-label { display: flex; flex-direction: column; gap: 4px; }
+.setting-divider { height: 1px; background-color: #eee; margin: 15px 0; }
+.setting-section-title { font-size: 0.9em; font-weight: bold; color: #555; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.setting-label { display: flex; flex-direction: column; gap: 4px; flex-grow: 1; }
 .setting-label label { font-weight: 600; color: #333; font-size: 0.95em; }
 .setting-desc { font-size: 0.8em; color: #888; }
 
@@ -91,10 +134,15 @@ const { settings } = useSettings();
   width: 60px; padding: 6px; border: 1px solid #ddd; border-radius: 6px;
   text-align: center; font-size: 1em;
 }
+.number-input.wide { width: 80px; }
+
+.radio-group { display: flex; gap: 10px; }
+.radio-label { display: flex; align-items: center; gap: 4px; font-size: 0.9em; cursor: pointer; }
 
 .settings-footer {
   padding: 15px 20px; border-top: 1px solid #eee;
   display: flex; justify-content: flex-end;
+  flex-shrink: 0;
 }
 .action-btn {
   background-color: #007bff; color: white; border: none;

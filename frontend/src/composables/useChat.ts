@@ -1,4 +1,4 @@
-import { ref, reactive, computed, nextTick } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import type { Message, ChatConfig } from '../types';
 import { calculateCost } from '../constants/pricing';
 import { ChatApiService } from '../services/chatApi';
@@ -25,12 +25,13 @@ export function useChat() {
     let currentId: string | null = rootId.value;
     
     while (currentId && messageMap.has(currentId)) {
-      const msg = messageMap.get(currentId)!;
+      const msg: Message = messageMap.get(currentId)!;
       history.push(msg);
       
       if (msg.childrenIds.length > 0) {
         if (msg.selectedChildIndex < msg.childrenIds.length) {
-          currentId = msg.childrenIds[msg.selectedChildIndex];
+          // Fix: Ensure undefined becomes null if index access fails (though guaranteed by check)
+          currentId = msg.childrenIds[msg.selectedChildIndex] ?? null;
         } else {
           currentId = null;
         }
@@ -63,20 +64,25 @@ export function useChat() {
       ...partialMsg
     };
     
+    // Add to map first
     messageMap.set(newMessage.id, newMessage);
+
+    // Retrieve the reactive proxy. This is CRITICAL. 
+    // If we return 'newMessage' (the raw object), mutations won't trigger Vue's reactivity system.
+    const reactiveMessage = messageMap.get(newMessage.id)!;
 
     if (parentId) {
       const parent = messageMap.get(parentId);
       if (parent) {
-        parent.childrenIds.push(newMessage.id);
+        parent.childrenIds.push(reactiveMessage.id);
         parent.selectedChildIndex = parent.childrenIds.length - 1;
       }
     } else {
       if (!rootId.value) {
-        rootId.value = newMessage.id;
+        rootId.value = reactiveMessage.id;
       }
     }
-    return newMessage;
+    return reactiveMessage;
   };
 
   const deleteMessage = (id: string) => {
@@ -136,9 +142,6 @@ export function useChat() {
   // Navigate to a specific message by updating the selectedChildIndex of all ancestors
   const navigateToMessage = (targetId: string) => {
     let curr = messageMap.get(targetId);
-    // We need to trace back from the target to the root
-    // But to update selectedChildIndex, we need to know the path from root? 
-    // Actually, just walking up parents and setting their selectedChildIndex to point to the child on the path is enough.
     
     while (curr && curr.parentId) {
       const parent = messageMap.get(curr.parentId);
@@ -149,7 +152,7 @@ export function useChat() {
         }
         curr = parent;
       } else {
-        break; // Should not happen if tree is consistent
+        break; 
       }
     }
   };
@@ -185,9 +188,6 @@ export function useChat() {
     let fullText = '';
 
     try {
-      // Create a snapshot of the conversation path UP TO the user message for the API context
-      // We cannot rely on conversationHistory.value because the user might switch branches immediately.
-      // We must reconstruct the history path for *this* specific branch.
       const buildHistoryForMsg = (msg: Message): Message[] => {
         const path: Message[] = [msg];
         let curr = msg;
@@ -211,8 +211,8 @@ export function useChat() {
         abortController.value.signal,
         {
           onChunk: (text) => {
-            // Update the message object DIRECTLY. 
-            // This works regardless of whether the message is currently in the conversationHistory view.
+            // Because modelMsg is the reactive proxy (thanks to the fix in addMessage),
+            // this mutation triggers Vue's reactivity system.
             if (isFirstChunk) {
               modelMsg.parts[0].text = text;
               isFirstChunk = false;

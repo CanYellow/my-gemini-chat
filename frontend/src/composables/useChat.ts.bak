@@ -1,4 +1,4 @@
-import { ref, reactive, computed, nextTick } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import type { Message, ChatConfig } from '../types';
 import { calculateCost } from '../constants/pricing';
 import { ChatApiService } from '../services/chatApi';
@@ -6,18 +6,16 @@ import { ChatApiService } from '../services/chatApi';
 // Simple ID generator
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
-export function useChat() {
-  // We use a Map to store all messages by ID
-  const messageMap = reactive(new Map<string, Message>());
-  
-  // Virtual root ID to anchor the first messages
-  const rootId = ref<string | null>(null);
-  
-  const isLoading = ref(false);
-  const abortController = ref<AbortController | null>(null);
-  
-  const apiService = new ChatApiService(import.meta.env.VITE_API_BASE_URL || '');
+// --- Shared State (Singleton) ---
+const messageMap = reactive(new Map<string, Message>());
+const rootId = ref<string | null>(null);
+const isLoading = ref(false);
+const currentGeneratingMessageId = ref<string | null>(null);
+const abortController = ref<AbortController | null>(null);
+const apiService = new ChatApiService(import.meta.env.VITE_API_BASE_URL || '');
 
+export function useChat() {
+  
   // Computed property to reconstruct the linear conversation history based on selected branches
   const conversationHistory = computed(() => {
     const history: Message[] = [];
@@ -27,12 +25,10 @@ export function useChat() {
     let currentId: string | null = rootId.value;
     
     while (currentId && messageMap.has(currentId)) {
-      const msg = messageMap.get(currentId)!;
+      const msg: Message = messageMap.get(currentId)!;
       history.push(msg);
       
       if (msg.childrenIds.length > 0) {
-        // If selectedChildIndex is within bounds, traverse down
-        // If selectedChildIndex === childrenIds.length, it means we are "drafting" a new branch, so stop here.
         if (msg.selectedChildIndex < msg.childrenIds.length) {
           currentId = msg.childrenIds[msg.selectedChildIndex];
         } else {
@@ -67,29 +63,31 @@ export function useChat() {
       ...partialMsg
     };
     
+    // Add to map first
     messageMap.set(newMessage.id, newMessage);
+
+    // Retrieve the reactive proxy. This is CRITICAL. 
+    // If we return 'newMessage' (the raw object), mutations won't trigger Vue's reactivity system.
+    const reactiveMessage = messageMap.get(newMessage.id)!;
 
     if (parentId) {
       const parent = messageMap.get(parentId);
       if (parent) {
-        parent.childrenIds.push(newMessage.id);
-        // Auto-select the new message
+        parent.childrenIds.push(reactiveMessage.id);
         parent.selectedChildIndex = parent.childrenIds.length - 1;
       }
     } else {
-      // If no parent, and no root, make it root
       if (!rootId.value) {
-        rootId.value = newMessage.id;
+        rootId.value = reactiveMessage.id;
       }
     }
-    return newMessage;
+    return reactiveMessage;
   };
 
   const deleteMessage = (id: string) => {
     const msg = messageMap.get(id);
     if (!msg) return;
 
-    // Helper to recursively delete subtree
     const deleteSubtree = (nodeId: string) => {
       const node = messageMap.get(nodeId);
       if (node) {
@@ -98,21 +96,18 @@ export function useChat() {
       }
     };
 
-    // Remove from parent's children
     if (msg.parentId) {
       const parent = messageMap.get(msg.parentId);
       if (parent) {
         const index = parent.childrenIds.indexOf(id);
         if (index !== -1) {
           parent.childrenIds.splice(index, 1);
-          // Adjust selectedChildIndex if needed
           if (parent.selectedChildIndex >= parent.childrenIds.length) {
             parent.selectedChildIndex = Math.max(0, parent.childrenIds.length - 1);
           }
         }
       }
     } else {
-      // If root
       if (rootId.value === id) {
         rootId.value = null;
       }
@@ -121,29 +116,15 @@ export function useChat() {
     deleteSubtree(id);
   };
 
-  const updateLastMessage = (text: string, append = true) => {
-    const history = conversationHistory.value;
-    const lastMsg = history[history.length - 1];
-    if (lastMsg && lastMsg.role === 'model') {
-       if (!append) {
-           lastMsg.parts[0].text = text;
-       } else {
-           lastMsg.parts[0].text += text;
-       }
-    }
-  };
-
   const stopGeneration = () => {
     if (abortController.value) {
       abortController.value.abort();
     }
   };
 
-  // Branching Logic
   const createBranch = (parentId: string) => {
     const parent = messageMap.get(parentId);
     if (parent) {
-      // Set selected index to 'length', effectively pointing to a non-existent child (Draft Mode)
       parent.selectedChildIndex = parent.childrenIds.length;
     }
   };
@@ -157,14 +138,30 @@ export function useChat() {
     }
   };
 
+  // Navigate to a specific message by updating the selectedChildIndex of all ancestors
+  const navigateToMessage = (targetId: string) => {
+    let curr = messageMap.get(targetId);
+    
+    while (curr && curr.parentId) {
+      const parent = messageMap.get(curr.parentId);
+      if (parent) {
+        const index = parent.childrenIds.indexOf(curr.id);
+        if (index !== -1) {
+          parent.selectedChildIndex = index;
+        }
+        curr = parent;
+      } else {
+        break; 
+      }
+    }
+  };
+
   const sendMessage = async (input: string, config: ChatConfig, onStreamUpdate: () => void) => {
     if (!input.trim() || isLoading.value) return;
 
     isLoading.value = true;
     abortController.value = new AbortController();
 
-    // Determine Parent ID
-    // The last message in the CURRENT view is the parent of the new user message.
     const history = conversationHistory.value;
     const parentMsg = history.length > 0 ? history[history.length - 1] : null;
     const parentId = parentMsg ? parentMsg.id : null;
@@ -184,38 +181,52 @@ export function useChat() {
       parentId: userMsg.id
     });
     
-    // Prepare history for API (all messages leading up to userMsg, inclusive)
-    // conversationHistory now includes [..., parent, userMsg, modelMsg]
-    // We want to send [..., parent, userMsg]
-    // We can just take conversationHistory.value.slice(0, -1) because modelMsg is the last one.
+    currentGeneratingMessageId.value = modelMsg.id;
     
     let isFirstChunk = true;
     let fullText = '';
 
     try {
+      const buildHistoryForMsg = (msg: Message): Message[] => {
+        const path: Message[] = [msg];
+        let curr = msg;
+        while (curr.parentId) {
+          const parent = messageMap.get(curr.parentId);
+          if (parent) {
+            path.unshift(parent);
+            curr = parent;
+          } else {
+            break;
+          }
+        }
+        return path;
+      };
+
+      const contextHistory = buildHistoryForMsg(userMsg);
+
       await apiService.sendMessageStream(
-        conversationHistory.value.slice(0, -1),
+        contextHistory,
         config,
         abortController.value.signal,
         {
           onChunk: (text) => {
+            // Because modelMsg is the reactive proxy (thanks to the fix in addMessage),
+            // this mutation triggers Vue's reactivity system.
             if (isFirstChunk) {
-              updateLastMessage(text, false);
+              modelMsg.parts[0].text = text;
               isFirstChunk = false;
             } else {
-              updateLastMessage(text, true);
+              modelMsg.parts[0].text += text;
             }
             fullText += text;
             onStreamUpdate();
           },
           onMetadata: (usage) => {
             const { inputCost, outputCost } = calculateCost(config.model, usage.promptTokenCount, usage.candidatesTokenCount);
-            if (modelMsg) {
-                modelMsg.inputTokens = usage.promptTokenCount;
-                modelMsg.outputTokens = usage.candidatesTokenCount;
-                modelMsg.inputCost = inputCost;
-                modelMsg.outputCost = outputCost;
-            }
+            modelMsg.inputTokens = usage.promptTokenCount;
+            modelMsg.outputTokens = usage.candidatesTokenCount;
+            modelMsg.inputCost = inputCost;
+            modelMsg.outputCost = outputCost;
           },
           onError: (err) => { throw err; }
         }
@@ -224,21 +235,20 @@ export function useChat() {
       modelMsg.receivedChars = fullText.length;
 
     } catch (error: any) {
-      if (modelMsg) {
-          if (error.name === 'AbortError') {
-             const stopText = '\n\n**[生成已手动停止]**';
-             if (modelMsg.parts[0].text === '思考中...') {
-                 modelMsg.parts[0].text = '**[生成已手动停止]**';
-             } else {
-                 modelMsg.parts[0].text += stopText;
-             }
-          } else {
-             modelMsg.parts[0].text = `**Error:** ${error.message || 'Unknown error'}`;
-          }
+      if (error.name === 'AbortError') {
+         const stopText = '\n\n**[生成已手动停止]**';
+         if (modelMsg.parts[0].text === '思考中...') {
+             modelMsg.parts[0].text = '**[生成已手动停止]**';
+         } else {
+             modelMsg.parts[0].text += stopText;
+         }
+      } else {
+         modelMsg.parts[0].text = `**Error:** ${error.message || 'Unknown error'}`;
       }
       onStreamUpdate();
     } finally {
       isLoading.value = false;
+      currentGeneratingMessageId.value = null;
       abortController.value = null;
     }
   };
@@ -246,10 +256,12 @@ export function useChat() {
   return {
     conversationHistory,
     isLoading,
+    currentGeneratingMessageId,
     sendMessage,
     stopGeneration,
     deleteMessage,
     createBranch,
-    switchBranch
+    switchBranch,
+    navigateToMessage
   };
 }
