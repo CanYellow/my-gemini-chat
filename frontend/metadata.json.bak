@@ -1,0 +1,5 @@
+{
+  "name": "simple-vue-starter",
+  "description": "A simple, clean Vite + Vue 3 + TypeScript starter project.",
+  "requestFramePermissions": []
+}
