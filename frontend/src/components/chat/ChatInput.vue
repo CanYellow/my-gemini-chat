@@ -1,47 +1,204 @@
 <template>
-  <div id="input-area">
-    <textarea
-      id="message-input"
-      placeholder="在这里输入消息... (Shift+Enter 换行)"
-      rows="1"
-      v-model="inputModel"
-      @keydown.enter.prevent.exact="handleEnter"
-      @keydown.shift.enter.prevent
-      @keyup.shift.enter="inputModel += '\n'; adjustHeight($event)"
-      @input="adjustHeight"
-      :disabled="isLoading"
-      ref="textareaRef"
-    ></textarea>
-    <button
-      id="send-button"
-      :title="isLoading ? '停止生成' : '发送'"
-      @click="isLoading ? $emit('stop') : handleSend()"
-      :disabled="!inputModel.trim() && !isLoading"
-      :class="{ 'stop-button': isLoading }"
-    >
-      <span v-if="isLoading">✕</span>
-      <span v-else>➤</span>
-    </button>
+  <div id="input-container">
+    <!-- Attachments Previews -->
+    <div v-if="attachments.length > 0" class="attachments-preview">
+      <div v-for="(att, index) in attachments" :key="index" class="attachment-item">
+        
+        <!-- Preview Content -->
+        <div class="preview-content">
+          <img v-if="att.mimeType.startsWith('image/')" :src="`data:${att.mimeType};base64,${att.data}`" alt="preview" />
+          <div v-else class="file-icon">
+            <span class="ext">{{ getExtension(att.name) }}</span>
+          </div>
+        </div>
+
+        <!-- Renaming Input / Label -->
+        <div class="attachment-name">
+          <input 
+            v-if="editingIndex === index" 
+            type="text" 
+            v-model="att.name" 
+            @blur="editingIndex = null" 
+            @keydown.enter="editingIndex = null"
+            ref="renameInputRef"
+          />
+          <span 
+            v-else 
+            @click="startRenaming(index)" 
+            title="点击重命名"
+          >
+            {{ att.name || 'File' }}
+          </span>
+        </div>
+
+        <button class="remove-btn" @click="removeAttachment(index)">×</button>
+      </div>
+    </div>
+
+    <div id="input-area">
+      <!-- File Upload Button -->
+      <button class="icon-btn file-btn" @click="triggerFileUpload" title="上传附件">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+      </button>
+      <input 
+        type="file" 
+        ref="fileInputRef" 
+        multiple 
+        style="display:none" 
+        @change="handleFileSelect"
+      />
+
+      <textarea
+        id="message-input"
+        placeholder="输入消息... (支持图片/文件粘贴)"
+        rows="1"
+        v-model="inputModel"
+        @keydown.enter.prevent.exact="handleEnter"
+        @keydown.shift.enter.prevent
+        @keyup.shift.enter="inputModel += '\n'; adjustHeight($event)"
+        @input="adjustHeight"
+        @paste="handlePaste"
+        :disabled="isLoading"
+        ref="textareaRef"
+      ></textarea>
+      
+      <button
+        id="send-button"
+        :title="isLoading ? '停止生成' : '发送'"
+        @click="isLoading ? $emit('stop') : handleSend()"
+        :disabled="(!inputModel.trim() && attachments.length === 0) && !isLoading"
+        :class="{ 'stop-button': isLoading }"
+      >
+        <span v-if="isLoading">✕</span>
+        <span v-else>➤</span>
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, computed } from 'vue';
+import type { InlineData } from '../../types';
+import { useSettings } from '../../composables/useSettings';
 
 const props = defineProps<{ isLoading: boolean }>();
 const emit = defineEmits<{
-  (e: 'send', text: string): void;
+  (e: 'send', text: string, attachments: InlineData[]): void;
   (e: 'stop'): void;
 }>();
 
+const { settings } = useSettings();
 const inputModel = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const renameInputRef = ref<HTMLInputElement[] | null>(null);
+const attachments = ref<InlineData[]>([]);
+const editingIndex = ref<number | null>(null);
+
+const allowedExtensionsList = computed(() => {
+  return settings.allowedExtensions.split(',').map(e => e.trim().toLowerCase()).filter(e => e);
+});
+
+const triggerFileUpload = () => {
+  if (fileInputRef.value) {
+    // Dynamically set accept attribute based on settings
+    fileInputRef.value.accept = settings.allowedExtensions;
+    fileInputRef.value.click();
+  }
+};
+
+const validateFile = (file: File): boolean => {
+  // 1. Check Size
+  const maxBytes = settings.maxFileSizeKB * 1024;
+  if (file.size > maxBytes) {
+    alert(`文件 "${file.name}" 太大 (${(file.size/1024).toFixed(1)}KB)。最大允许: ${settings.maxFileSizeKB}KB`);
+    return false;
+  }
+
+  // 2. Check Extension
+  const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+  if (allowedExtensionsList.value.length > 0 && !allowedExtensionsList.value.includes(ext)) {
+    // Fallback: check mime type roughly if extension check fails or is generic
+    // But for now strict extension check as requested
+    alert(`不支持的文件类型: ${file.name}\n允许的类型: ${settings.allowedExtensions}`);
+    return false;
+  }
+
+  return true;
+};
+
+const processFile = (file: File) => {
+  if (!validateFile(file)) return;
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const result = e.target?.result as string;
+    const [meta, data] = result.split(',');
+    const mimeType = meta.match(/:(.*?);/)![1];
+    
+    attachments.value.push({ 
+      mimeType, 
+      data,
+      name: file.name
+    });
+  };
+  reader.readAsDataURL(file);
+};
+
+const handleFileSelect = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  if (target.files) {
+    Array.from(target.files).forEach(processFile);
+  }
+  // Reset input
+  if (fileInputRef.value) fileInputRef.value.value = '';
+};
+
+const handlePaste = (event: ClipboardEvent) => {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file) processFile(file);
+    }
+  }
+};
+
+const removeAttachment = (index: number) => {
+  attachments.value.splice(index, 1);
+  if (editingIndex.value === index) editingIndex.value = null;
+};
+
+const startRenaming = (index: number) => {
+  editingIndex.value = index;
+  nextTick(() => {
+    // Focus the input
+    if (renameInputRef.value && renameInputRef.value[0]) {
+       // Note: ref in v-for might be array or single depending on vue version/usage, 
+       // but here since v-if switches, we might need a more robust ref handling or just rely on autofocus if simple.
+       // Actually simpler to just focus the input that appears.
+       const input = document.querySelector('.attachment-name input') as HTMLInputElement;
+       input?.focus();
+    }
+  });
+};
+
+const getExtension = (name?: string) => {
+  return name ? name.split('.').pop()?.toUpperCase() : '?';
+};
 
 const handleSend = () => {
   const text = inputModel.value;
-  if (!text.trim()) return;
-  emit('send', text);
+  if (!text.trim() && attachments.value.length === 0) return;
+  
+  emit('send', text, [...attachments.value]);
+  
   inputModel.value = '';
+  attachments.value = [];
+  editingIndex.value = null;
+  
   // Reset height
   if (textareaRef.value) textareaRef.value.style.height = 'auto';
 };
@@ -71,15 +228,116 @@ defineExpose({ focus });
 </script>
 
 <style scoped>
-#input-area {
-  display: flex; align-items: flex-end; padding: 12px; border-top: 1px solid #eee;
-  background-color: #fafafa; flex-shrink: 0;
+#input-container {
+  display: flex;
+  flex-direction: column;
+  background-color: #fafafa;
+  border-top: 1px solid #eee;
+  flex-shrink: 0;
 }
+
+.attachments-preview {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px 0 12px;
+  overflow-x: auto;
+}
+
+.attachment-item {
+  position: relative;
+  width: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.preview-content {
+  width: 80px;
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #ddd;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-content img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.file-icon {
+  width: 100%;
+  height: 100%;
+  background: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-weight: bold;
+  font-size: 0.8em;
+  text-transform: uppercase;
+}
+
+.attachment-name {
+  font-size: 0.75em;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.attachment-name input {
+  width: 100%;
+  font-size: inherit;
+  padding: 2px;
+  border: 1px solid #007bff;
+  border-radius: 2px;
+  text-align: center;
+}
+
+.remove-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: red;
+  color: white;
+  border: 2px solid white;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  z-index: 10;
+  padding: 0;
+}
+
+#input-area {
+  display: flex; align-items: flex-end; padding: 12px;
+}
+
+.icon-btn.file-btn {
+  background: none; border: none; cursor: pointer; color: #666;
+  padding: 10px; margin-right: 5px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s;
+}
+.icon-btn.file-btn:hover { background-color: #e0e0e0; color: #333; }
+
 #message-input {
   flex-grow: 1; border: 1px solid #ccc; border-radius: 18px; padding: 10px 15px;
   resize: none; font-size: 1em; font-family: inherit; line-height: 1.4; max-height: 120px; overflow-y: auto;
 }
 #message-input:focus { outline: none; border-color: #007bff; box-shadow: 0 0 0 2px rgba(0,123,255,0.25); }
+
 #send-button {
   background: #007bff; color: white; border: none; border-radius: 50%; width: 44px; height: 44px;
   margin-left: 10px; cursor: pointer; font-size: 1.4em; display: flex; justify-content: center;

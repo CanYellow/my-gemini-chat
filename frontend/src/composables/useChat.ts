@@ -1,5 +1,5 @@
 import { ref, reactive, computed } from 'vue';
-import type { Message, ChatConfig } from '../types';
+import type { Message, ChatConfig, InlineData, MessagePart } from '../types';
 import { calculateCost } from '../constants/pricing';
 import { ChatApiService } from '../services/chatApi';
 
@@ -12,15 +12,19 @@ const rootId = ref<string | null>(null);
 const isLoading = ref(false);
 const currentGeneratingMessageId = ref<string | null>(null);
 const abortController = ref<AbortController | null>(null);
-const apiService = new ChatApiService(import.meta.env.VITE_API_BASE_URL || '');
+const apiService = new ChatApiService((import.meta as any).env.VITE_API_BASE_URL || '');
 
 // --- Compact Export Types ---
-// [id, role(0/1), text, parentId, childrenIds, selectedChildIndex, timestamp, meta?]
+// [id, role(0/1), content, parentId, childrenIds, selectedChildIndex, timestamp, meta?]
 type RoleEnum = 0 | 1; // 0: user, 1: model
+
+// Content can be string (legacy/text-only) or Array of parts
+type CompactContent = string | MessagePart[]; 
+
 type CompactMessage = [
   string,          // 0: id
   RoleEnum,        // 1: role
-  string,          // 2: text content
+  CompactContent,  // 2: content (text or parts)
   string | null,   // 3: parentId
   string[],        // 4: childrenIds
   number,          // 5: selectedChildIndex
@@ -50,7 +54,7 @@ export function useChat() {
       
       if (msg.childrenIds.length > 0) {
         if (msg.selectedChildIndex < msg.childrenIds.length) {
-          // Fix: Ensure undefined becomes null if index access fails (though guaranteed by check)
+          // Fix: Ensure undefined becomes null if index access fails
           currentId = msg.childrenIds[msg.selectedChildIndex] ?? null;
         } else {
           currentId = null;
@@ -65,12 +69,12 @@ export function useChat() {
   // Helper to create a new message node
   const createMessageNode = (
     role: 'user' | 'model', 
-    text: string, 
+    parts: MessagePart[], 
     parentId: string | null
   ): Message => ({
     id: generateId(),
     role,
-    parts: [{ text }],
+    parts,
     parentId,
     childrenIds: [],
     selectedChildIndex: 0,
@@ -79,16 +83,19 @@ export function useChat() {
 
   const addMessage = (partialMsg: Partial<Message>) => {
     const parentId = partialMsg.parentId ?? null;
+    
+    // Ensure parts exist
+    let parts = partialMsg.parts || [{ text: '' }];
+    
     const newMessage = {
-      ...createMessageNode(partialMsg.role || 'user', partialMsg.parts?.[0].text || '', parentId),
+      ...createMessageNode(partialMsg.role || 'user', parts, parentId),
       ...partialMsg
     };
     
     // Add to map first
     messageMap.set(newMessage.id, newMessage);
 
-    // Retrieve the reactive proxy. This is CRITICAL. 
-    // If we return 'newMessage' (the raw object), mutations won't trigger Vue's reactivity system.
+    // Retrieve the reactive proxy.
     const reactiveMessage = messageMap.get(newMessage.id)!;
 
     if (parentId) {
@@ -159,10 +166,8 @@ export function useChat() {
     }
   };
 
-  // Navigate to a specific message by updating the selectedChildIndex of all ancestors
   const navigateToMessage = (targetId: string) => {
     let curr = messageMap.get(targetId);
-    
     while (curr && curr.parentId) {
       const parent = messageMap.get(curr.parentId);
       if (parent) {
@@ -177,8 +182,9 @@ export function useChat() {
     }
   };
 
-  const sendMessage = async (input: string, config: ChatConfig, onStreamUpdate: () => void) => {
-    if (!input.trim() || isLoading.value) return;
+  // Updated to accept attachments
+  const sendMessage = async (input: string, attachments: InlineData[], config: ChatConfig, onStreamUpdate: () => void) => {
+    if ((!input.trim() && attachments.length === 0) || isLoading.value) return;
 
     isLoading.value = true;
     abortController.value = new AbortController();
@@ -187,11 +193,22 @@ export function useChat() {
     const parentMsg = history.length > 0 ? history[history.length - 1] : null;
     const parentId = parentMsg ? parentMsg.id : null;
 
-    // 1. Add User Message
+    // 1. Construct User Message Parts
+    const userParts: MessagePart[] = [];
+    
+    // Add images first
+    attachments.forEach(att => {
+        userParts.push({ inlineData: att });
+    });
+    // Add text if present
+    if (input) {
+        userParts.push({ text: input });
+    }
+
     const userMsg = addMessage({
       role: 'user',
-      parts: [{ text: input }],
-      sentChars: input.length,
+      parts: userParts,
+      sentChars: input.length, 
       parentId
     });
 
@@ -230,16 +247,28 @@ export function useChat() {
         config,
         abortController.value.signal,
         {
-          onChunk: (text) => {
-            // Because modelMsg is the reactive proxy (thanks to the fix in addMessage),
-            // this mutation triggers Vue's reactivity system.
+          onChunk: (part: MessagePart) => {
             if (isFirstChunk) {
-              modelMsg.parts[0].text = text;
+              modelMsg.parts = []; // Clear "Thinking..."
               isFirstChunk = false;
-            } else {
-              modelMsg.parts[0].text += text;
             }
-            fullText += text;
+
+            // Handle Text Parts: Accumulate into the last text part if possible to avoid fragmentation
+            if (part.text) {
+              const lastPart = modelMsg.parts[modelMsg.parts.length - 1];
+              if (lastPart && lastPart.text !== undefined && !lastPart.inlineData) {
+                lastPart.text += part.text;
+              } else {
+                modelMsg.parts.push({ text: part.text });
+              }
+              fullText += part.text;
+            } 
+            
+            // Handle Image Parts: Always push as new part
+            if (part.inlineData) {
+              modelMsg.parts.push({ inlineData: part.inlineData });
+            }
+            
             onStreamUpdate();
           },
           onMetadata: (usage) => {
@@ -258,13 +287,19 @@ export function useChat() {
     } catch (error: any) {
       if (error.name === 'AbortError') {
          const stopText = '\n\n**[生成已手动停止]**';
-         if (modelMsg.parts[0].text === '思考中...') {
+         if (modelMsg.parts.length === 1 && modelMsg.parts[0].text === '思考中...') {
              modelMsg.parts[0].text = '**[生成已手动停止]**';
          } else {
-             modelMsg.parts[0].text += stopText;
+             // Append to last text part if exists
+             const lastPart = modelMsg.parts[modelMsg.parts.length - 1];
+             if (lastPart && lastPart.text !== undefined) {
+                 lastPart.text += stopText;
+             } else {
+                 modelMsg.parts.push({ text: stopText });
+             }
          }
       } else {
-         modelMsg.parts[0].text = `**Error:** ${error.message || 'Unknown error'}`;
+         modelMsg.parts = [{ text: `**Error:** ${error.message || 'Unknown error'}` }];
       }
       onStreamUpdate();
     } finally {
@@ -275,8 +310,7 @@ export function useChat() {
   };
 
   /**
-   * Serializes the entire chat history into a highly compact JSON string.
-   * Structure: { v: 1, r: rootId, d: [Array of CompactMessage] }
+   * Serializes state.
    */
   const exportState = (): string => {
     if (!rootId.value) return '';
@@ -286,7 +320,6 @@ export function useChat() {
     for (const msg of messageMap.values()) {
         const role: RoleEnum = msg.role === 'user' ? 0 : 1;
         
-        // Metadata: compact short keys
         const meta: Record<string, any> = {};
         if (msg.inputTokens) meta.it = msg.inputTokens;
         if (msg.outputTokens) meta.ot = msg.outputTokens;
@@ -294,10 +327,18 @@ export function useChat() {
         if (msg.outputCost) meta.oc = msg.outputCost;
         if (msg.collapsed) meta.c = 1;
         
+        // Compact content: string if simple text, array otherwise
+        let content: CompactContent;
+        if (msg.parts.length === 1 && msg.parts[0].text !== undefined && !msg.parts[0].inlineData) {
+            content = msg.parts[0].text;
+        } else {
+            content = msg.parts;
+        }
+        
         const compact: CompactMessage = [
             msg.id,
             role,
-            msg.parts[0].text,
+            content,
             msg.parentId,
             msg.childrenIds,
             msg.selectedChildIndex,
@@ -312,7 +353,7 @@ export function useChat() {
     }
 
     const exportData: CompactExport = {
-        v: 1,
+        v: 2,
         r: rootId.value,
         d: messages
     };
@@ -320,41 +361,44 @@ export function useChat() {
     return JSON.stringify(exportData);
   };
 
-  /**
-   * Restores chat history from a JSON string.
-   */
   const importState = (json: string) => {
       try {
           const data = JSON.parse(json) as CompactExport;
-          // Simple version check
-          if (data.v !== 1) throw new Error('Unsupported file version');
+          if (data.v !== 1 && data.v !== 2) throw new Error('Unsupported file version');
           if (!data.d || !Array.isArray(data.d)) throw new Error('Invalid data format');
           
-          // Clear current state
           messageMap.clear();
           rootId.value = null;
           
           data.d.forEach(m => {
-              // Destructure compact array
-              const [id, roleEnum, text, parentId, childrenIds, selectedChildIndex, timestamp, meta] = m;
+              const [id, roleEnum, content, parentId, childrenIds, selectedChildIndex, timestamp, meta] = m;
               
+              let parts: MessagePart[];
+              let charCount = 0;
+
+              if (typeof content === 'string') {
+                  parts = [{ text: content }];
+                  charCount = content.length;
+              } else {
+                  parts = content;
+                  charCount = parts.reduce((acc, p) => acc + (p.text?.length || 0), 0);
+              }
+
               const msg: Message = {
                   id,
                   role: roleEnum === 0 ? 'user' : 'model',
-                  parts: [{ text }],
+                  parts: parts,
                   parentId,
                   childrenIds,
                   selectedChildIndex,
                   timestamp,
-                  // Rehydrate metadata
                   inputTokens: meta?.it,
                   outputTokens: meta?.ot,
                   inputCost: meta?.ic,
                   outputCost: meta?.oc,
                   collapsed: !!meta?.c,
-                  // Recalculate basic chars for UI
-                  sentChars: roleEnum === 0 ? text.length : undefined,
-                  receivedChars: roleEnum === 1 ? text.length : undefined
+                  sentChars: roleEnum === 0 ? charCount : undefined,
+                  receivedChars: roleEnum === 1 ? charCount : undefined
               };
               
               messageMap.set(id, msg);
@@ -364,7 +408,7 @@ export function useChat() {
           
       } catch (e) {
           console.error('Import failed', e);
-          throw e; // Propagate to UI
+          throw e;
       }
   };
 

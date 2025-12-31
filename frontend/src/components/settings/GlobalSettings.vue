@@ -39,6 +39,42 @@
 
         <div class="setting-divider"></div>
 
+        <div class="setting-section-title">附件设置</div>
+
+        <div class="setting-item">
+          <div class="setting-label">
+            <label for="max-file-size">文件大小限制 (KB)</label>
+            <span class="setting-desc">单个附件的最大允许大小。</span>
+          </div>
+          <div class="setting-control">
+            <input 
+              type="number" 
+              id="max-file-size" 
+              v-model.number="settings.maxFileSizeKB" 
+              min="1" 
+              class="number-input wide"
+            >
+          </div>
+        </div>
+
+        <div class="setting-item stack">
+          <div class="setting-label">
+            <label for="allowed-extensions">允许的文件类型</label>
+            <span class="setting-desc">输入允许的扩展名，用逗号分隔 (如 .jpg,.pdf)。</span>
+          </div>
+          <div class="setting-control full-width">
+            <input 
+              type="text" 
+              id="allowed-extensions" 
+              v-model="settings.allowedExtensions" 
+              class="text-input"
+              placeholder=".jpg,.png,.pdf,.txt"
+            >
+          </div>
+        </div>
+
+        <div class="setting-divider"></div>
+
         <div class="setting-section-title">汇率设置 (USD -> CNY)</div>
 
         <div class="setting-item">
@@ -121,6 +157,11 @@ const { settings } = useSettings();
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 20px; gap: 15px;
 }
+.setting-item.stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
 .setting-item:last-child { margin-bottom: 0; }
 
 .setting-divider { height: 1px; background-color: #eee; margin: 15px 0; }
@@ -135,6 +176,13 @@ const { settings } = useSettings();
   text-align: center; font-size: 1em;
 }
 .number-input.wide { width: 80px; }
+
+.text-input {
+  width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px;
+  font-size: 0.95em; box-sizing: border-box;
+}
+
+.full-width { width: 100%; }
 
 .radio-group { display: flex; gap: 10px; }
 .radio-label { display: flex; align-items: center; gap: 4px; font-size: 0.9em; cursor: pointer; }

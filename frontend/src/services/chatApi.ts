@@ -1,8 +1,8 @@
 import { MODEL_NAME_MAPPING } from '../constants/pricing';
-import type { Message, ChatConfig } from '../types';
+import type { Message, ChatConfig, MessagePart } from '../types';
 
 export interface StreamCallbacks {
-  onChunk: (text: string) => void;
+  onChunk: (part: MessagePart) => void;
   onMetadata: (usage: { promptTokenCount: number; candidatesTokenCount: number }) => void;
   onError: (error: Error) => void;
 }
@@ -34,9 +34,25 @@ export class ChatApiService {
         }
     }
 
+    // Construct Payload: Sanitize parts to remove UI-only fields (like `name` in InlineData)
+    const contents = payloadMessages.map(msg => ({
+      role: msg.role,
+      parts: msg.parts.map(p => {
+        if (p.inlineData) {
+          return {
+            inlineData: {
+              mimeType: p.inlineData.mimeType,
+              data: p.inlineData.data
+            }
+          };
+        }
+        return { text: p.text };
+      })
+    }));
+
     const payload = {
         model: apiModelName,
-        contents: payloadMessages.map(msg => ({ role: msg.role, parts: msg.parts })),
+        contents,
         generationConfig: {
             temperature: config.temperature,
             topP: config.topP,
@@ -76,11 +92,15 @@ export class ChatApiService {
                     
                     try {
                         const data = JSON.parse(jsonStr);
-                        const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                        const candidate = data.candidates?.[0];
                         
-                        if (textContent) {
-                            callbacks.onChunk(textContent);
+                        if (candidate?.content?.parts) {
+                            // Iterate over ALL parts, not just the first one
+                            for (const part of candidate.content.parts) {
+                                callbacks.onChunk(part);
+                            }
                         }
+                        
                         if (data.usageMetadata) {
                             callbacks.onMetadata(data.usageMetadata);
                         }

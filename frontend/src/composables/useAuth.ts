@@ -2,7 +2,7 @@ import { ref, onMounted } from 'vue';
 
 export function useAuth() {
   const isAuthenticated = ref(false);
-  const SECRET_KEY = import.meta.env.VITE_ACCESS_KEY;
+  const SECRET_KEY = (import.meta as any).env.VITE_ACCESS_KEY;
 
   onMounted(() => {
     if (!SECRET_KEY) {

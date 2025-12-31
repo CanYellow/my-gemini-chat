@@ -8,8 +8,41 @@
       :style="collapsedStyle"
     >
       <div ref="contentRef" class="content-inner">
-        <div v-if="message.role === 'user'" class="text">{{ message.parts[0].text }}</div>
-        <div v-else class="text" v-html="renderedContent"></div>
+        <!-- Loop through parts -->
+        <div v-for="(part, index) in message.parts" :key="index" class="message-part">
+          
+          <!-- Image Part -->
+          <div v-if="part.inlineData && part.inlineData.mimeType.startsWith('image/')" class="image-container group">
+            <img 
+              :src="`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`" 
+              alt="Content" 
+              class="chat-image"
+            />
+            <button class="download-btn" @click="downloadFile(part.inlineData.data, part.inlineData.mimeType, part.inlineData.name || 'image')" title="下载图片">
+               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            </button>
+          </div>
+
+          <!-- File Part (Non-Image) -->
+          <div v-else-if="part.inlineData" class="file-card">
+            <div class="file-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            </div>
+            <div class="file-info">
+              <span class="file-name">{{ part.inlineData.name || 'Attachment' }}</span>
+              <span class="file-type">{{ part.inlineData.mimeType }}</span>
+            </div>
+            <button class="file-download-btn" @click="downloadFile(part.inlineData.data, part.inlineData.mimeType, part.inlineData.name || 'file')">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            </button>
+          </div>
+          
+          <!-- Text Part -->
+          <div v-if="part.text" class="text-content">
+             <div v-if="message.role === 'user'" class="text user-text">{{ part.text }}</div>
+             <div v-else class="text model-text" v-html="renderMarkdown(part.text)"></div>
+          </div>
+        </div>
       </div>
       
       <div v-if="isCollapsed" class="collapse-overlay"></div>
@@ -53,20 +86,17 @@
     <div class="message-footer">
       <!-- Meta Info -->
       <div class="meta-info">
-        <!-- Character Count (Still preserved as requested) -->
         <div v-if="message.sentChars !== undefined || message.receivedChars !== undefined" class="char-info">
           <span v-if="message.sentChars !== undefined">{{ message.sentChars }}字</span>
           <span v-if="message.receivedChars !== undefined" class="received-chars">{{ message.receivedChars }}字</span>
         </div>
         
-        <!-- Token Info (Updated format) -->
         <div v-if="message.inputTokens !== undefined" class="token-info">
           <span title="Input Tokens">In: {{ message.inputTokens }} tokens</span>
           <span class="separator">|</span>
           <span title="Output Tokens">Out: {{ message.outputTokens }} tokens</span>
         </div>
 
-        <!-- Cost Info (Calculated from tokens) -->
         <div v-if="costDisplay" class="cost-info">
           <span title="USD">${{ costDisplay.usd }}</span>
           <span class="cost-cny" title="CNY (Estimated)"> (¥{{ costDisplay.cny }})</span>
@@ -75,7 +105,6 @@
 
       <!-- Actions -->
       <div class="actions">
-        <!-- Branch Button: ALWAYS visible. Creates a new branch with THIS message as parent. -->
         <button 
           class="action-btn branch-btn" 
           @click="handleCreateBranch" 
@@ -119,10 +148,6 @@ const { effectiveRate } = useExchangeRate();
 const contentRef = ref<HTMLElement | null>(null);
 const isOverflowing = ref(false);
 
-const renderedContent = computed(() => {
-  return renderMarkdown(props.message.parts[0].text);
-});
-
 const costDisplay = computed(() => {
   const inCost = props.message.inputCost || 0;
   const outCost = props.message.outputCost || 0;
@@ -141,12 +166,9 @@ const costDisplay = computed(() => {
 // Branch Navigation Logic
 const hasChildren = computed(() => props.message.childrenIds.length > 0);
 const isDrafting = computed(() => props.message.selectedChildIndex >= props.message.childrenIds.length);
-
 const showBranchNav = computed(() => props.message.childrenIds.length > 1 || (hasChildren.value && isDrafting.value));
-
 const currentBranchIndex = computed(() => props.message.selectedChildIndex + 1);
 const totalBranches = computed(() => props.message.childrenIds.length);
-
 const pageInput = ref(currentBranchIndex.value.toString());
 
 watch(currentBranchIndex, (newVal) => {
@@ -166,7 +188,6 @@ const nextBranch = () => {
 };
 
 const handleCreateBranch = () => {
-  // Use THIS message as the parent for the new branch
   createBranch(props.message.id);
 };
 
@@ -183,6 +204,24 @@ const resetPageInput = () => {
    pageInput.value = currentBranchIndex.value.toString();
 };
 
+// File Download Logic
+const downloadFile = (base64: string, mimeType: string, filename: string) => {
+  const link = document.createElement('a');
+  link.href = `data:${mimeType};base64,${base64}`;
+  
+  // Attempt to detect extension from filename, else mime type
+  let name = filename;
+  if (name.indexOf('.') === -1) {
+     const ext = mimeType.split('/')[1] || 'bin';
+     name = `${name}.${ext}`;
+  }
+  
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
 const checkOverflow = () => {
   if (!contentRef.value) return;
   const lineHeightEm = 1.6;
@@ -190,15 +229,20 @@ const checkOverflow = () => {
   const fontSize = parseFloat(getComputedStyle(contentRef.value).fontSize || '13');
   const maxAllowedHeight = settings.collapseThreshold * lineHeightEm * fontSize;
   
+  // Increase threshold tolerance slightly for images
   isOverflowing.value = fullHeight > maxAllowedHeight + 10;
 };
 
-watch(() => [props.message.parts[0].text, settings.collapseThreshold], () => {
+// Watch all text parts text to trigger overflow check
+const textContentCombined = computed(() => props.message.parts.map(p => p.text).join(''));
+
+watch(() => [textContentCombined.value, settings.collapseThreshold], () => {
   nextTick(checkOverflow);
 }, { flush: 'post' });
 
 onMounted(() => {
-  setTimeout(checkOverflow, 100);
+  // Wait a bit longer for images to render size
+  setTimeout(checkOverflow, 200);
 });
 
 const isCollapsed = computed(() => {
@@ -218,7 +262,6 @@ const collapsedStyle = computed(() => {
 </script>
 
 <style scoped>
-/* Branch Nav Styles */
 .branch-nav {
   margin-top: 8px;
   display: flex;
@@ -258,26 +301,97 @@ const collapsedStyle = computed(() => {
   font-weight: bold; font-size: 0.85em; margin-bottom: 4px; color: #555; width: 100%;
 }
 
-/* Wrapper for collapse */
 .content-wrapper {
   position: relative; border-radius: 16px; background-color: transparent; transition: max-height 0.3s ease;
 }
-.content-inner { overflow: hidden; }
+.content-inner { overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+
+/* Image Styling */
+.image-container {
+  max-width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 4px;
+  position: relative; 
+}
+.chat-image {
+  max-width: 300px;
+  max-height: 300px;
+  display: block;
+  border-radius: 8px;
+  cursor: default;
+}
+/* Allow larger images in model response */
+.message.model .chat-image {
+  max-width: 100%;
+}
+
+/* File Card Styling */
+.file-card {
+  display: flex; align-items: center; gap: 10px;
+  background-color: #f8f9fa; border: 1px solid #e0e0e0;
+  border-radius: 8px; padding: 10px; margin-bottom: 5px;
+  max-width: 300px;
+}
+.file-icon {
+  width: 36px; height: 36px; background-color: #e2e6ea;
+  border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  color: #6c757d;
+}
+.file-info {
+  display: flex; flex-direction: column; flex-grow: 1; overflow: hidden;
+}
+.file-name {
+  font-weight: 500; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: #333;
+}
+.file-type {
+  font-size: 0.75em; color: #888;
+}
+.file-download-btn {
+  background: none; border: none; cursor: pointer; color: #007bff;
+  padding: 4px; border-radius: 4px;
+}
+.file-download-btn:hover { background-color: #e2e6ea; }
+
+/* Download Button Overlay for Images */
+.download-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: rgba(0,0,0,0.5);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-container:hover .download-btn {
+  opacity: 1;
+}
+.download-btn:hover {
+  background-color: rgba(0,0,0,0.7);
+}
 
 /* User Message */
-.message.user .content-wrapper { align-self: flex-end; }
+.message.user .content-wrapper { align-self: flex-end; align-items: flex-end; }
 .message.user .role { text-align: right; }
-.message.user .text { 
+.message.user .text.user-text { 
   background: #007bff; color: white; padding: 10px 15px; 
   border-radius: 16px; border-bottom-right-radius: 4px; 
   white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; 
-  line-height: 1.6; text-align: left;
+  line-height: 1.6; text-align: left; display: inline-block;
 }
 
 /* Model Message */
 .message.model .content-wrapper { align-self: flex-start; max-width: 100%; }
 .message.model .role { text-align: left; }
-.message.model .text { 
+.message.model .text.model-text { 
   background: #e9ecef; color: #333; padding: 10px 15px; 
   border-radius: 16px; border-bottom-left-radius: 4px; 
   max-width: 100%; overflow-wrap: break-word; word-break: break-all; 
@@ -300,16 +414,8 @@ const collapsedStyle = computed(() => {
 .message-footer {
   display: flex; align-items: center; margin-top: 5px; width: 100%; padding: 0 4px; gap: 15px; flex-wrap: wrap;
 }
-
-/* User Footer: Align Right (Actions on right) */
-.message.user .message-footer {
-  justify-content: flex-end;
-}
-
-/* Model Footer: Align Left (Actions on left) */
-.message.model .message-footer {
-  justify-content: flex-start;
-}
+.message.user .message-footer { justify-content: flex-end; }
+.message.model .message-footer { justify-content: flex-start; }
 
 .meta-info { display: flex; flex-direction: row; gap: 12px; font-size: 0.75em; color: #999; align-items: center; flex-wrap: wrap; }
 .char-info { font-family: sans-serif; }

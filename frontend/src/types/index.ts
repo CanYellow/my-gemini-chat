@@ -1,11 +1,18 @@
+export interface InlineData {
+  mimeType: string;
+  data: string;
+  name?: string;
+}
+
 export interface MessagePart {
-  text: string;
+  text?: string;
+  inlineData?: InlineData;
 }
 
 export interface Message {
   id: string;
   role: 'user' | 'model';
-  parts: [MessagePart, ...MessagePart[]];
+  parts: MessagePart[]; // Changed from fixed tuple to array
   
   // Tree structure
   parentId: string | null;
