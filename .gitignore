@@ -105,3 +105,5 @@ Thumbs.db
 .pnpm-store/
 *Zone.Identifier
 *Identifier
+*.zip
+*.bak

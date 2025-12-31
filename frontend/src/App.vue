@@ -1,747 +1,348 @@
 <template>
-  <div id="app" :style="{ '--base-font-size': selectedFontSize }">
-      <!-- 使用 template 标签和 v-if 来包裹整个聊天界面 -->
+  <div id="app" :style="{ '--base-font-size': fontSize }">
     <template v-if="isAuthenticated">
-    <div id="header">
-      <h1>我的 Gemini 客户端</h1>
-      <div id="settings">
-        <!-- 注意：模型名称已更新以匹配价格表中的键名 -->
-		<select v-model="selectedModel">
-		  <option value="gemini-3-pro-preview">Gemini 3-Pro-Preview</option>
-		  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-		  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-		</select>
-        <select v-model="contextLength" title="选择上下文轮次">
-          <option value="all">全部对话</option>
-          <option value="20">最近10轮</option>
-          <option value="12">最近6轮</option>
-          <option value="8">最近4轮</option>
-          <option value="4">最近2轮</option>
-          <option value="2">最近1轮</option>
-          <option value="0">无上下文</option>
-        </select>
-        <select v-model="selectedFontSize" title="选择字体大小">
-          <option value="12px">小</option>
-          <option value="13px">默认</option>
-          <option value="14px">中</option>
-          <option value="16px">大</option>
-        </select>
-        <div class="slider-container" title="温度 (Temperature): 控制生成文本的随机性。值越高，回答越具创意性；值越低，回答越趋于确定性。">
-          <label for="temperature">T</label>
-          <input type="range" id="temperature" min="0" max="1" step="0.05" v-model.number="temperature">
-          <span>{{ temperature.toFixed(2) }}</span>
-        </div>
-        <div class="slider-container" title="Top-P: 控制模型从哪些词汇中选择下一个词。例如，0.7 表示模型会从概率总和为 70% 的最可能词汇中进行选择。">
-          <label for="topP">P</label>
-          <input type="range" id="topP" min="0" max="1" step="0.05" v-model.number="topP">
-          <span>{{ topP.toFixed(2) }}</span>
-        </div>
-      </div>
-    </div>
-    <div id="chat-window" ref="chatWindowRef" @scroll="handleScroll">
-      <div v-for="(message, index) in conversationHistory" :key="index" :class="['message', message.role]">
-        <div class="role">{{ message.role === 'user' ? 'You' : 'Model' }}</div>
-        <div class="text" v-if="message.role === 'user'">{{ message.parts[0].text }}</div>
-        <div class="text" v-else v-html="renderMarkdown(message.parts[0].text)"></div>
-        <!-- 原始字符统计信息 -->
-        <div v-if="message.sentChars !== undefined || message.receivedChars !== undefined" class="token-info">
-          <span v-if="message.sentChars !== undefined">发送字符数: {{ message.sentChars }}</span>
-          <span v-if="message.receivedChars !== undefined" class="received-chars">接收字符数: {{ message.receivedChars }}</span>
-        </div>
-        <!-- 新增：Token 和费用信息 -->
-        <div v-if="message.inputTokens !== undefined" class="token-info cost-info">
-          <span title="输入 Token 数及费用 (USD)">
-            消耗: {{ message.inputTokens }} tokens (≈ ${{ message.inputCost?.toFixed(6) }})
-          </span>
-          <span title="输出 Token 数及费用 (USD)" class="received-chars">
-            生成: {{ message.outputTokens }} tokens (≈ ${{ message.outputCost?.toFixed(6) }})
-          </span>
-        </div>
-      </div>
-    </div>
-	<button v-if="showCompletionHint" @click="forceScrollToBottom" class="completion-hint" title="滚动到底部">
-	  ↓ 新消息
-	</button>
+      <!-- Header with Title, Settings Button and Global Actions -->
+      <AppSettings
+        v-model:title="pageTitle"
+        v-model:fontSize="fontSize"
+        @openSettings="showSettings = true"
+        @collapseAll="handleGlobalCollapse"
+        @expandAll="handleGlobalExpand"
+        @export="handleExport"
+        @restore="handleImport"
+      />
 
-    <div id="input-area">
-      <textarea
-        id="message-input"
-        placeholder="在这里输入消息... (Shift+Enter 换行)"
-        rows="1"
-        v-model="userInput"
-        @keydown.enter.prevent.exact="sendMessage"
-        @keydown.shift.enter.prevent
-        @keyup.shift.enter="userInput += '\n'; autoResizeTextarea($event)"
-        @input="autoResizeTextarea"
-        :disabled="isLoading"
-        ref="textareaRef"
-      ></textarea>
-      <button
-        id="send-button"
-        :title="isLoading ? '停止生成' : '发送'"
-        @click="isLoading ? stopGeneration() : sendMessage()"
-        :disabled="!userInput.trim() && !isLoading"
-        :class="{ 'stop-button': isLoading }"
-      >
-        <span v-if="isLoading">✕</span>
-        <span v-else>➤</span>
+      <div id="chat-window" ref="chatWindowRef" @scroll="handleScroll" @click="handleCopyClick">
+        <ChatMessage 
+          v-for="msg in conversationHistory" 
+          :key="msg.id" 
+          :message="msg" 
+          @delete="handleDelete"
+        />
+      </div>
+
+      <button v-if="showCompletionHint" @click="handleHintClick" class="completion-hint">
+        {{ hintText }}
       </button>
-    </div>
-    </template> <!-- 这是 v-if="isAuthenticated" 的结束标签 -->   
 
-    <!-- 新增：当验证失败时，显示这个访问受限的界面 -->
-    <div v-else class="access-denied">
-      <h2>🔒 访问受限</h2>
-      <p>请通过包含有效访问令牌的链接访问此页面。</p>
-      <p class="warning">
-        <strong>重要:</strong> 如果您的令牌包含 <code>#</code>, <code>+</code>, <code>&</code>, <code>%</code> 等特殊字符,
-        您必须使用 <strong>URL编码后</strong> 的令牌。
-      </p>
-      <p>
-        <strong>错误示例:</strong> <code>.../?token=my#secret+key</code><br>
-        <strong>正确示例:</strong> <code>.../?token=my%23secret%2Bkey</code>
-      </p>
-    </div>
-        
+      <!-- Settings Bar (Model, Context, etc.) -->
+      <ChatSettings
+        v-model:model="model"
+        v-model:contextLength="contextLength"
+        v-model:temperature="temperature"
+        v-model:topP="topP"
+      />
+
+      <ChatInput 
+        :isLoading="isLoading" 
+        @send="onSend" 
+        @stop="stopGeneration" 
+        ref="inputRef"
+      />
+
+      <!-- Global Settings Modal -->
+      <GlobalSettings v-if="showSettings" @close="showSettings = false" />
+    </template>
+
+    <AccessDenied v-else />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onUnmounted } from 'vue';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import type { Tokens } from 'marked';
+import { ref, onMounted, nextTick, watch, computed } from 'vue';
+import { useAuth } from './composables/useAuth';
+import { useChat } from './composables/useChat';
+import { useSettings } from './composables/useSettings';
+import type { ModelKey } from './types';
 
-// --- 新增：价格和汇率配置 ---
-// 价格来源: Google AI Platform 定价 (USD per 1 million tokens)
-// 注意：这里我们只处理了“标准”使用场景下的文本输入定价。
-const MODEL_PRICING = {
-  'gemini-3-pro-preview': {
-    // 价格分层，以输入 token 数为依据
-    tier1: {
-      threshold: 200000, // 阈值：<= 200k tokens
-      input: 2.00,
-      output: 12.00,
-    },
-    tier2: { // > 200k tokens
-      input: 4.00,
-      output: 18.00,
-    },
-  },
-  'gemini-2.5-pro': {
-    // 价格分层，以输入 token 数为依据
-    tier1: {
-      threshold: 200000, // 阈值：<= 200k tokens
-      input: 1.25,
-      output: 10.00,
-    },
-    tier2: { // > 200k tokens
-      input: 2.50,
-      output: 15.00,
-    },
-  },
-  'gemini-2.5-flash': {
-    // 固定价格
-    input: 0.30,
-    output: 2.50,
-  },
-};
+// Components
+import AppSettings from './components/header/AppSettings.vue';
+import ChatMessage from './components/chat/ChatMessage.vue';
+import ChatInput from './components/chat/ChatInput.vue';
+import ChatSettings from './components/chat/ChatSettings.vue';
+import AccessDenied from './components/auth/AccessDenied.vue';
+import GlobalSettings from './components/settings/GlobalSettings.vue';
 
-// 兼容旧的模型名称，映射到新的
-const MODEL_NAME_MAPPING: { [key: string]: keyof typeof MODEL_PRICING } = {
-  'gemini-3-pro-preview': 'gemini-2.5-pro',
-  'gemini-2.5-pro': 'gemini-2.5-pro',
-  'gemini-2.5-flash': 'gemini-2.5-flash',
-}
+// State
+const { isAuthenticated } = useAuth();
+const { 
+  conversationHistory, 
+  isLoading, 
+  currentGeneratingMessageId,
+  sendMessage, 
+  stopGeneration, 
+  deleteMessage,
+  navigateToMessage,
+  exportState,
+  importState
+} = useChat();
+const { settings } = useSettings();
 
+// UI State
+const pageTitle = ref('我的 Gemini 客户端');
+const showSettings = ref(false);
 
-// --- 类型定义 (已扩展) ---
-interface MessagePart {
-  text: string;
-}
-interface Message {
-  role: 'user' | 'model';
-  // 将 parts 的类型从 MessagePart[] 修改为 [MessagePart, ...MessagePart[]]
-  // 这表示 parts 数组至少包含一个 MessagePart 元素
-  parts: [MessagePart, ...MessagePart[]];
-  sentChars?: number;
-  receivedChars?: number;
-  // 新增：用于存储 token 和费用信息
-  inputTokens?: number;
-  outputTokens?: number;
-  inputCost?: number;
-  outputCost?: number;
-}
+// Model Settings
+const model = ref<ModelKey>('gemini-2.5-flash');
+const contextLength = ref('0');
+const fontSize = ref('13px');
+const temperature = ref(0.1);
+const topP = ref(0.7);
 
-// --- 响应式状态 ---
-const userInput = ref('');
-const conversationHistory = ref<Message[]>([]);
-const selectedModel = ref<keyof typeof MODEL_PRICING>('gemini-2.5-flash'); // 默认模型
-const contextLength = ref('12'); // 默认最近6轮
-const isLoading = ref(false);
-const shouldAutoScroll = ref(true); // 新增：用于控制当前消息是否自动滚动
-const abortController = ref<AbortController | null>(null);
-const showCompletionHint = ref(false);
-const isAuthenticated = ref(false); // 新增：用于控制访问权限
-const selectedFontSize = ref('13px'); // 新增：用于控制全局字体大小
-const temperature = ref(0.1); // 新增：模型温度
-const topP = ref(0.7); // 新增：模型 Top-P
+// Update document title
+watch(pageTitle, (newTitle) => {
+  document.title = newTitle || 'Gemini Client';
+}, { immediate: true });
 
-// --- DOM 引用 ---
+// UI Refs & Scroll State
 const chatWindowRef = ref<HTMLElement | null>(null);
-const textareaRef = ref<HTMLTextAreaElement | null>(null);
-// 注意：streamBuffer 和 rendererIntervalId 已被移除
+const inputRef = ref<InstanceType<typeof ChatInput> | null>(null);
+const showCompletionHint = ref(false);
+const shouldAutoScroll = ref(true);
 
-// --- API 配置 ---
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+// Track the ID of a new message that is currently hidden (in another branch)
+const pendingJumpMessageId = ref<string | null>(null);
 
+// Watch conversation history to clear pending jump if the message becomes visible manually
+watch(conversationHistory, (history) => {
+  if (pendingJumpMessageId.value) {
+    const isVisible = history.some(m => m.id === pendingJumpMessageId.value);
+    if (isVisible) {
+      pendingJumpMessageId.value = null;
+      // Re-evaluate auto-scroll logic if needed, but usually manual navigation implies we are where we want to be.
+    }
+  }
+});
 
-// --- 方法 ---
+// Computed Hint Logic
+const isGeneratingMessageVisible = computed(() => {
+  if (!currentGeneratingMessageId.value) return false;
+  return conversationHistory.value.some(m => m.id === currentGeneratingMessageId.value);
+});
 
-// 自动滚动到底部 (无需修改)
+const hintText = computed(() => {
+  // If we have a pending hidden message (either generating or finished), show Jump hint
+  if (pendingJumpMessageId.value) {
+    return '↪ 跳转到新消息分支';
+  }
+  return '↓ 新消息';
+});
+
+// Scroll Logic
 const scrollToBottom = (force = false) => {
   nextTick(() => {
-    const chatWindow = chatWindowRef.value;
-    if (chatWindow) {
-      const isScrolledToBottom = chatWindow.scrollHeight - chatWindow.scrollTop - chatWindow.clientHeight < 100;
-      if (force || isScrolledToBottom) {
-        chatWindow.scrollTop = chatWindow.scrollHeight;
+    const el = chatWindowRef.value;
+    if (el) {
+      const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+      if (force || isAtBottom) {
+        el.scrollTop = el.scrollHeight;
       }
     }
   });
 };
 
-// 动态调整文本框高度 (已修正，支持智能滚动)
-const autoResizeTextarea = (event: Event) => {
-  const textarea = event.target as HTMLTextAreaElement;
-
-  // --- 新增：在调整大小前，检查滚动条是否在底部 ---
-  // 我们设置一个小的容差值（例如 5px），以防计算出现微小误差
-  const isScrolledToBottom = textarea.scrollHeight - textarea.scrollTop - textarea.clientHeight < 5;
-
-  // 保持原有的高度调整逻辑
-  textarea.style.height = 'auto';
-  const newHeight = Math.min(textarea.scrollHeight, 120);
-  textarea.style.height = `${newHeight}px`;
-
-  // --- 修改：只有当用户之前就在底部时，才执行滚动 ---
-  // 这样，当用户在中间编辑时，视图不会跳动
-  if (isScrolledToBottom) {
-    textarea.scrollTop = textarea.scrollHeight;
-  }
-};
-
-// --- 为 marked 创建并配置自定义渲染器 ---
-const renderer = new marked.Renderer();
-const originalCodeRenderer = renderer.code; // 保存原始的 code 渲染器
-
-// 最终正确的签名：函数接收一个完整的 Tokens.Code 对象
-renderer.code = function(codeToken: Tokens.Code) {
-  // 关键修正：将接收到的【原始 codeToken 对象】完整地传回给原始渲染器
-  const rawCodeBlock = originalCodeRenderer.call(this, codeToken);
-  
-  const copyButton = `
-    <button class="copy-code-button" title="Copy code">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-      <span class="copy-text">Copy</span>
-    </button>
-  `;
-  
-  return `<div class="code-block-wrapper">${copyButton}${rawCodeBlock}</div>`;
-};
-
-// --- 告诉 marked 使用我们配置好的渲染器 ---
-marked.use({ renderer });
-
-// 安全地渲染 Markdown (无需修改)
-const renderMarkdown = (text: string) => {
-  marked.setOptions({
-    gfm: true,
-    breaks: true,
-  });
-  return DOMPurify.sanitize(marked.parse(text) as string);
-};
-
-// --- 新增：计费函数 ---
-const calculateCost = (model: keyof typeof MODEL_PRICING, inputTokens: number, outputTokens: number) => {
-  const modelPricingInfo = MODEL_PRICING[model];
-  if (!modelPricingInfo) {
-    return { inputCost: 0, outputCost: 0 };
-  }
-
-  let inputPrice = 0;
-  let outputPrice = 0;
-
-  // 检查是否为具有分层定价的 Pro 模型
-  if (model === 'gemini-2.5-pro' && 'tier1' in modelPricingInfo) {
-    if (inputTokens <= modelPricingInfo.tier1.threshold) {
-      inputPrice = modelPricingInfo.tier1.input;
-      outputPrice = modelPricingInfo.tier1.output;
-    } else {
-      inputPrice = modelPricingInfo.tier2.input;
-      outputPrice = modelPricingInfo.tier2.output;
-    }
-  } 
-  if (model === 'gemini-3-pro-preview' && 'tier1' in modelPricingInfo) {
-    if (inputTokens <= modelPricingInfo.tier1.threshold) {
-      inputPrice = modelPricingInfo.tier1.input;
-      outputPrice = modelPricingInfo.tier1.output;
-    } else {
-      inputPrice = modelPricingInfo.tier2.input;
-      outputPrice = modelPricingInfo.tier2.output;
-    }
-  } 
-else if ('input' in modelPricingInfo) { // 处理像 Flash 这样的固定价格模型
-    inputPrice = modelPricingInfo.input;
-    outputPrice = modelPricingInfo.output;
-  }
-
-  const inputCost = (inputTokens / 1_000_000) * inputPrice;
-  const outputCost = (outputTokens / 1_000_000) * outputPrice;
-
-  return { inputCost, outputCost }; // 直接返回美元成本
-};
-
-// 发送消息 (核心逻辑修改)
-const sendMessage = async () => {
-    showCompletionHint.value = false;
-    const trimmedInput = userInput.value.trim();
-    if (!trimmedInput || isLoading.value) return;
-
-    isLoading.value = true;
-    abortController.value = new AbortController();
-    shouldAutoScroll.value = true;
-
-    let historyForPayload: Message[] = [];
-    if (contextLength.value === 'all') {
-        historyForPayload = conversationHistory.value;
-    } else {
-        const length = parseInt(contextLength.value, 10);
-        if (length > 0) {
-            historyForPayload = conversationHistory.value.slice(-length);
-        }
-    }
-
-    const payloadContents = [
-        ...historyForPayload.map(msg => ({ role: msg.role, parts: msg.parts })),
-        { role: 'user', parts: [{ text: trimmedInput }] }
-    ];
-
-    const userMessage: Message = {
-        role: 'user',
-        parts: [{ text: trimmedInput }],
-        sentChars: trimmedInput.length
-    };
-    conversationHistory.value.push(userMessage);
-    userInput.value = '';
-    if (textareaRef.value) textareaRef.value.style.height = 'auto';
-    scrollToBottom(true);
-
-    const modelMessage: Message = { role: 'model', parts: [{ text: '思考中...' }] };
-    conversationHistory.value.push(modelMessage);
-    const modelMessageIndex = conversationHistory.value.length - 1;
-    const apiModelName = MODEL_NAME_MAPPING[selectedModel.value] || selectedModel.value;
-
-    try {
-        const response = await fetch(`${API_BASE_URL}/api/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: apiModelName,
-                contents: payloadContents,
-                generationConfig: {
-                  temperature: temperature.value,
-                  topP: topP.value,
-                }
-            }),
-            signal: abortController.value.signal,
-        });
-
-        if (!response.ok || !response.body) {
-            let errorText = `HTTP 错误! 状态: ${response.status}`;
-            try {
-                const errorData = await response.json();
-                errorText = errorData.error?.message || JSON.stringify(errorData);
-            } catch (e) { /* 忽略解析错误 */ }
-            throw new Error(errorText);
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullResponseText = '';
-        let usageMetadata: { promptTokenCount: number; candidatesTokenCount: number } | null = null;
-        let isFirstChunk = true;
-        const chatWindow = chatWindowRef.value;
-        if (chatWindow) {
-            shouldAutoScroll.value = chatWindow.scrollHeight - chatWindow.scrollTop - chatWindow.clientHeight < 40;
-        }
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const jsonStr = line.substring(6).trim();
-                    if (!jsonStr || jsonStr === '[DONE]') continue;
-                    try {
-                        const data = JSON.parse(jsonStr);
-                        const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                        if (textContent) {
-                            const messageToUpdate = conversationHistory.value[modelMessageIndex]!;
-                            if (isFirstChunk) {
-                                messageToUpdate.parts[0].text = textContent;
-                                isFirstChunk = false;
-                            } else {
-                                messageToUpdate.parts[0].text += textContent;
-                            }
-                            fullResponseText += textContent;
-                            if (shouldAutoScroll.value) {
-                                scrollToBottom(true);
-                            }
-                        }
-                        if (data.usageMetadata) {
-                            usageMetadata = data.usageMetadata;
-                        }
-                    } catch (e) {
-                        console.error('无法解析 JSON 数据块:', jsonStr, e);
-                    }
-                }
-            }
-        }
-        
-        if (!shouldAutoScroll.value) {
-          showCompletionHint.value = true;
-        }
-
-        const finalModelMessage = conversationHistory.value[modelMessageIndex]!;
-        finalModelMessage.receivedChars = fullResponseText.length;
-        if (usageMetadata) {
-            const { promptTokenCount, candidatesTokenCount } = usageMetadata;
-            const { inputCost, outputCost } = calculateCost(apiModelName, promptTokenCount, candidatesTokenCount);
-            finalModelMessage.inputTokens = promptTokenCount;
-            finalModelMessage.outputTokens = candidatesTokenCount;
-            finalModelMessage.inputCost = inputCost;
-            finalModelMessage.outputCost = outputCost;
-        }
-
-    } catch (error: any) {
-        // --- 关键修改就在这个 catch 块里 ---
-        const messageToUpdate = conversationHistory.value[modelMessageIndex];
-        // 确保消息仍然存在，以防万一
-        if (messageToUpdate) {
-            if (error.name === 'AbortError') {
-                console.log('生成已手动停止。');
-                // 如果消息仍然是“思考中...”，则直接替换它
-                if (messageToUpdate.parts[0].text === '思考中...') {
-                    messageToUpdate.parts[0].text = '**[生成已手动停止]**';
-                } else {
-                    // 如果已经有部分内容，则在后面追加停止信息
-                    messageToUpdate.parts[0].text += '\n\n**[生成已手动停止]**';
-                }
-            } else {
-                console.error('发送消息时出错:', error);
-                const errorMessage = error instanceof Error ? error.message : '未知错误';
-                messageToUpdate.parts[0].text = `**出错了:** ${errorMessage}`;
-            }
-        }
-        scrollToBottom(true);
-    } finally {
-        isLoading.value = false;
-        abortController.value = null;
-        nextTick(() => {
-            textareaRef.value?.focus();
-        });
-    }
-};
-
-// 滚动事件处理器
 const handleScroll = () => {
-  const chatWindow = chatWindowRef.value;
-  if (chatWindow) {
-    const isNearBottom = chatWindow.scrollHeight - chatWindow.scrollTop - chatWindow.clientHeight < 40;
-
-    // 核心修改：实时根据用户滚动位置更新自动滚动状态
-    // 如果用户在底部附近，我们就认为他希望自动滚动。一旦他向上滚动，就立即禁用。
+  const el = chatWindowRef.value;
+  if (el) {
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     shouldAutoScroll.value = isNearBottom;
-
-    // 当用户快要滚动回底部时，自动隐藏提示按钮 (此逻辑保留)
-    if (isNearBottom) {
+    
+    // Logic to hide hint:
+    // 1. If we are near bottom AND (no hidden message pending OR hidden message is now visible)
+    if (isNearBottom && !pendingJumpMessageId.value) {
       showCompletionHint.value = false;
     }
   }
 };
 
-// 强制滚动到底部并隐藏提示
 const forceScrollToBottom = () => {
   scrollToBottom(true);
   showCompletionHint.value = false;
 };
 
-// 停止生成
-const stopGeneration = () => {
-  if (abortController.value) {
-    abortController.value.abort();
-    // isLoading 会在 sendMessage 的 finally 块中被设置为 false
+const handleHintClick = () => {
+  if (pendingJumpMessageId.value) {
+    // Message is in another branch, switch to it
+    navigateToMessage(pendingJumpMessageId.value);
+    
+    // Wait for DOM update (branch switch) then scroll
+    nextTick(() => {
+      forceScrollToBottom();
+      shouldAutoScroll.value = true;
+    });
+  } else {
+    // Message is in current view, just scroll
+    forceScrollToBottom();
+    shouldAutoScroll.value = true;
   }
 };
 
-// 新增：处理复制按钮点击的函数 (事件委托)
-const handleChatWindowClick = async (event: MouseEvent) => {
-  const target = event.target as HTMLElement;
-  // 使用 .closest() 来确保即使用户点击了按钮内的图标或文字也能找到按钮
-  const copyButton = target.closest('.copy-code-button');
-
-  // 如果点击的不是复制按钮，或者按钮已经处于“已复制”状态，则不执行任何操作
-  if (!copyButton || copyButton.classList.contains('copied')) {
+// Handlers
+const handleDelete = (id: string) => {
+  if (isLoading.value) {
+    alert("请等待生成完成后再删除消息。");
     return;
   }
+  if (confirm('确定要删除这条消息及其后续分支吗？')) {
+    deleteMessage(id);
+  }
+};
 
-  // 从按钮向上查找整个代码块的容器
-  const wrapper = copyButton.closest('.code-block-wrapper');
-  if (!wrapper) return;
+const handleGlobalCollapse = () => {
+  conversationHistory.value.forEach((msg) => {
+    msg.collapsed = true;
+  });
+};
 
-  // 在容器内找到 <pre> 标签，它的 innerText 包含我们需要的纯文本代码
-  const preElement = wrapper.querySelector('pre');
-  if (!preElement) return;
+const handleGlobalExpand = () => {
+  conversationHistory.value.forEach(msg => {
+    msg.collapsed = false;
+  });
+};
 
-  const codeToCopy = preElement.innerText;
+const handleExport = () => {
+  const jsonStr = exportState();
+  if (!jsonStr) {
+    alert("没有可导出的聊天记录。");
+    return;
+  }
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `chat-history-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
 
+const handleImport = (jsonStr: string) => {
+  if (isLoading.value) {
+    alert("生成过程中无法导入。");
+    return;
+  }
+  if (!confirm("导入将覆盖当前所有聊天记录，确定继续吗？")) {
+    return;
+  }
+  
   try {
-    // 尝试将文本写入剪贴板
-    await navigator.clipboard.writeText(codeToCopy);
-    
-    const copyText = copyButton.querySelector('.copy-text');
-    if (copyText) {
-      copyText.textContent = 'Copied!';
-    }
-    copyButton.classList.add('copied');
+    importState(jsonStr);
+    scrollToBottom(true);
+  } catch (e) {
+    alert("导入失败：文件格式不正确或已损坏。");
+  }
+};
 
-    // 2秒后恢复按钮状态
-    setTimeout(() => {
-      if (copyText) {
-        copyText.textContent = 'Copy';
-      }
-      copyButton.classList.remove('copied');
-    }, 2000);
-  } catch (err) {
-    console.error('Failed to copy text: ', err);
-    const copyText = copyButton.querySelector('.copy-text');
-    if (copyText) copyText.textContent = 'Error';
-     setTimeout(() => {
-      if (copyText) {
-        copyText.textContent = 'Copy';
-      }
-    }, 2000);
+const onSend = (text: string) => {
+  if (settings.enableAutoCollapse) {
+    conversationHistory.value.forEach(msg => {
+      msg.collapsed = true;
+    });
+  }
+
+  showCompletionHint.value = false;
+  shouldAutoScroll.value = true;
+  pendingJumpMessageId.value = null; // Reset pending jump
+  scrollToBottom(true);
+
+  sendMessage(
+    text,
+    {
+      model: model.value,
+      temperature: temperature.value,
+      topP: topP.value,
+      contextLength: contextLength.value
+    },
+    () => { // On Stream Update callback
+       // Check if the generating message is in the current view
+       if (isGeneratingMessageVisible.value) {
+         if (shouldAutoScroll.value) {
+           scrollToBottom(true);
+         } else {
+           showCompletionHint.value = true;
+         }
+       } else {
+         // Generating message is NOT in view (user switched branch)
+         // Always show hint so they can jump back
+         showCompletionHint.value = true;
+         
+         // Capture the ID so we can jump to it even after generation finishes
+         if (currentGeneratingMessageId.value) {
+            pendingJumpMessageId.value = currentGeneratingMessageId.value;
+         }
+       }
+    }
+  ).then(() => {
+    nextTick(() => inputRef.value?.focus());
+  });
+};
+
+// Copy Code Logic (Event Delegation)
+const handleCopyClick = async (event: MouseEvent) => {
+  const target = event.target as HTMLElement;
+  const copyButton = target.closest('.copy-code-button');
+
+  if (!copyButton || copyButton.classList.contains('copied')) return;
+
+  const wrapper = copyButton.closest('.code-block-wrapper');
+  const preElement = wrapper?.querySelector('pre');
+
+  if (preElement) {
+    try {
+      await navigator.clipboard.writeText(preElement.innerText);
+      const copyText = copyButton.querySelector('.copy-text');
+      if (copyText) copyText.textContent = 'Copied!';
+      copyButton.classList.add('copied');
+      setTimeout(() => {
+        if (copyText) copyText.textContent = 'Copy';
+        copyButton.classList.remove('copied');
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy', err);
+    }
   }
 };
 
 onMounted(() => {
-  const SECRET_KEY = import.meta.env.VITE_ACCESS_KEY;
-  if (!SECRET_KEY) {
-    console.error("错误：未在 .env.local 文件中设置 VITE_ACCESS_KEY");
-    isAuthenticated.value = false;
-    return;
-  }
-  if (sessionStorage.getItem('app_access_key') === SECRET_KEY) {
-    isAuthenticated.value = true;
-  } else {
-    const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
-    if (token === SECRET_KEY) {
-      isAuthenticated.value = true;
-      sessionStorage.setItem('app_access_key', SECRET_KEY);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }
-
   if (isAuthenticated.value) {
-    nextTick(() => { // 使用 nextTick 确保 DOM 已经渲染
-        textareaRef.value?.focus();
-        const chatWindow = chatWindowRef.value;
-        if (chatWindow) {
-          chatWindow.addEventListener('scroll', handleScroll);
-          // 关键：在这里为父容器添加点击事件监听器
-          chatWindow.addEventListener('click', handleChatWindowClick); 
-        }
-    });
-  }
-});
-
-onUnmounted(() => {
-  const chatWindow = chatWindowRef.value;
-  if (chatWindow) {
-    chatWindow.removeEventListener('scroll', handleScroll);
-    // 关键：组件销毁时移除监听器，防止内存泄漏
-    chatWindow.removeEventListener('click', handleChatWindowClick); 
+    nextTick(() => inputRef.value?.focus());
   }
 });
 </script>
 
 <style>
-/* ... 你的所有现有 CSS 样式都保留 ... */
+/* Global Layout Styles */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  background-color: #f4f4f9;
-  margin: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
-  color: #333;
+  background-color: #f4f4f9; margin: 0; display: flex; justify-content: center; align-items: center;
+  height: 100vh; color: #333;
 }
 
 #app {
-  width: 90%;
-  max-width: 800px;
-  height: 95vh;
-  max-height: 900px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  font-size: var(--base-font-size, 13px); /* 确保有这一行 */
+  width: 90%; max-width: 800px; height: 95vh; max-height: 900px; background: #fff;
+  border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); display: flex;
+  flex-direction: column; overflow: hidden; font-size: var(--base-font-size, 13px);
+  position: relative; 
 }
 
-#header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 20px;
-  border-bottom: 1px solid #eee;
-  background-color: #fafafa;
-  flex-shrink: 0;
-}
-
-h1 {
-  font-size: 1.1em;
-  color: #444;
-  margin: 0;
-  padding: 15px 0;
-}
-
-#settings {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-#settings select {
-  padding: 5px 8px;
-  border-radius: 6px;
-  border: 1px solid #ddd;
-  font-size: 0.9em;
-  background-color: #fff;
-}
-
-#chat-window {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 15px;
-  display: flex;
-  flex-direction: column;
-}
-
-.message {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 15px;
-  max-width: 95%;
-}
-
-.message .role {
-  font-weight: bold;
-  font-size: 0.85em;
-  margin-bottom: 4px;
-  color: #555;
-}
-
-.message .text {
-  padding: 10px 15px;
-  border-radius: 16px;
-  line-height: 1.5;
-  word-wrap: break-word;
-  text-align: left;
-}
-
-.message.user {
-  align-self: flex-end;
-  align-items: flex-end;
-}
-
-.message.user .text {
-  background: #007bff;
-  color: white;
-  border-bottom-right-radius: 4px;
-  max-width: 100%; 
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  word-break: break-word; /* 新增：更强力地处理长单词或URL，确保其在气泡内换行 */
-}
-
-.message.model {
-  align-self: flex-start;
-  align-items: flex-start;
-}
-
-.message.model .text {
-  background: #e9ecef;
-  color: #333;
-  border-bottom-left-radius: 4px;
-  max-width: 100%;          /* 1. 定死宽度：强制气泡宽度不能超过其父容器 (.message.model) 的宽度 */
-  overflow-wrap: break-word; /* 2. 文本换行：确保气泡内的普通长文本可以换行 */
-  word-break: break-all;     /* 3. 强力换行：进一步确保非代码文本不会撑开气泡 */
-}
-
-.token-info {
-  font-size: 0.75em;
-  color: #888;
-  margin-top: 5px;
-  display: flex;
-  gap: 12px; /* 增加了间距 */
-}
-.message.user .token-info {
-  align-self: flex-end;
-}
-.message.model .token-info {
-  align-self: flex-start;
-}
-.token-info .received-chars {
-  color: #666;
-}
-
-/* --- 新增：费用信息样式 --- */
-.cost-info {
-  color: #6c757d; /* 使用更柔和的颜色 */
-  margin-top: 3px;
+#chat-window { 
+  flex-grow: 1; 
+  overflow-y: auto; 
+  padding: 15px; 
+  display: flex; 
+  flex-direction: column; 
+  text-align: left; 
 }
 
 .completion-hint {
-  position: absolute;
-  bottom: 75px; /* 调整位置，使其在输入框上方 */
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-  
-  background-color: #007bff;
-  color: white;
-  border: none;
-  border-radius: 20px;
-  padding: 8px 16px;
-  font-size: calc(var(--base-font-size, 13px) - 1px);
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  position: absolute; bottom: 130px; 
+  left: 50%; transform: translateX(-50%); z-index: 10;
+  background-color: #007bff; color: white; border: none; border-radius: 20px; padding: 8px 16px;
+  font-size: calc(var(--base-font-size, 13px) - 1px); font-weight: 500; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.2); transition: opacity 0.3s ease, transform 0.3s ease;
 }
-
-.completion-hint:hover {
-  background-color: #0056b3;
-  transform: translateX(-50%) translateY(-2px);
-}
+.completion-hint:hover { background-color: #0056b3; transform: translateX(-50%) translateY(-2px); }
 
 #input-area {
   display: flex;

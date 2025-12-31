@@ -1,0 +1,5 @@
+{
+  "name": "my-gemini-chat",
+  "description": "A simple, clean Vite + Vue 3 + TypeScript starter project.",
+  "requestFramePermissions": []
+}

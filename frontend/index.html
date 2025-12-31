@@ -5,9 +5,22 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>frontend</title>
-  </head>
+  <script type="importmap">
+{
+  "imports": {
+    "vue": "https://esm.sh/vue@^3.5.26",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "@vitejs/plugin-vue": "https://esm.sh/@vitejs/plugin-vue@^6.0.3",
+    "dompurify": "https://esm.sh/dompurify@^3.3.1",
+    "marked": "https://esm.sh/marked@^17.0.1"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
-  </body>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>
