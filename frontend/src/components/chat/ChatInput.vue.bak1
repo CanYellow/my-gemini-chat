@@ -142,7 +142,7 @@ const processFile = (file: File) => {
     const data = result.substring(commaIndex + 1);
     
     const mimeMatch = meta.match(/:(.*?);/);
-    if (!mimeMatch || !mimeMatch[1]) return;
+    if (!mimeMatch) return;
     const mimeType = mimeMatch[1];
     
     attachments.value.push({ 

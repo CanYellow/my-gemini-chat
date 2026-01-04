@@ -287,8 +287,9 @@ export function useChat() {
     } catch (error: any) {
       if (error.name === 'AbortError') {
          const stopText = '\n\n**[生成已手动停止]**';
-         if (modelMsg.parts.length === 1 && modelMsg.parts[0].text === '思考中...') {
-             modelMsg.parts[0].text = '**[生成已手动停止]**';
+         const firstPart = modelMsg.parts[0];
+         if (modelMsg.parts.length === 1 && firstPart && firstPart.text === '思考中...') {
+             firstPart.text = '**[生成已手动停止]**';
          } else {
              // Append to last text part if exists
              const lastPart = modelMsg.parts[modelMsg.parts.length - 1];
@@ -329,8 +330,9 @@ export function useChat() {
         
         // Compact content: string if simple text, array otherwise
         let content: CompactContent;
-        if (msg.parts.length === 1 && msg.parts[0].text !== undefined && !msg.parts[0].inlineData) {
-            content = msg.parts[0].text;
+        const firstPart = msg.parts[0];
+        if (msg.parts.length === 1 && firstPart && firstPart.text !== undefined && !firstPart.inlineData) {
+            content = firstPart.text;
         } else {
             content = msg.parts;
         }
