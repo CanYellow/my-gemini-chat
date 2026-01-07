@@ -15,8 +15,8 @@ export const MODEL_PRICING: Record<ModelKey, ModelPricing> = {
   },
 };
 
-export const MODEL_NAME_MAPPING: Record<string, ModelKey> = {
-  'gemini-3-pro-preview': 'gemini-2.5-pro', // Mapping as per original logic, though likely needs update in future
+export const MODEL_NAME_MAPPING: Record<string, string> = {
+  'gemini-3-pro-preview': 'gemini-3-pro-preview',
   'gemini-2.5-pro': 'gemini-2.5-pro',
   'gemini-2.5-flash': 'gemini-2.5-flash',
 };

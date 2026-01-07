@@ -82,12 +82,28 @@ const { settings } = useSettings();
 const pageTitle = ref('我的 Gemini 客户端');
 const showSettings = ref(false);
 
-// Model Settings
-const model = ref<ModelKey>('gemini-2.5-flash');
-const contextLength = ref('0');
-const fontSize = ref('13px');
-const temperature = ref(0.1);
-const topP = ref(0.7);
+// --- Model Settings (with Persistence) ---
+const getStored = <T>(key: string, def: T): T => {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : def;
+  } catch {
+    return def;
+  }
+};
+
+const model = ref<ModelKey>(getStored('chat_setting_model', 'gemini-2.5-flash'));
+const contextLength = ref<string>(getStored('chat_setting_context', 'all')); 
+const fontSize = ref<string>(getStored('chat_setting_fontsize', '13px'));
+const temperature = ref<number>(getStored('chat_setting_temp', 0.1));
+const topP = ref<number>(getStored('chat_setting_topp', 0.7));
+
+// Persist settings changes
+watch(model, v => localStorage.setItem('chat_setting_model', JSON.stringify(v)));
+watch(contextLength, v => localStorage.setItem('chat_setting_context', JSON.stringify(v)));
+watch(fontSize, v => localStorage.setItem('chat_setting_fontsize', JSON.stringify(v)));
+watch(temperature, v => localStorage.setItem('chat_setting_temp', JSON.stringify(v)));
+watch(topP, v => localStorage.setItem('chat_setting_topp', JSON.stringify(v)));
 
 // Update document title
 watch(pageTitle, (newTitle) => {

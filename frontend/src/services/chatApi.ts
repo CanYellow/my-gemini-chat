@@ -20,21 +20,28 @@ export class ChatApiService {
     signal: AbortSignal,
     callbacks: StreamCallbacks
   ) {
+    // Ensure we use the correct model name from mapping or config
     const apiModelName = MODEL_NAME_MAPPING[config.model] || config.model;
     
-    // Filter history based on context length
+    // Strict context length filtering
     let payloadMessages = history;
-    if (config.contextLength !== 'all') {
-        const length = parseInt(config.contextLength, 10);
-        if (length > 0) {
-          payloadMessages = history.slice(-length);
-        } else if (length === 0) {
-          // If 0, only send the last message (the new user input) which is already appended to history
-           payloadMessages = history.slice(-1);
+    const lengthStr = String(config.contextLength); // Normalize to string for comparison
+
+    if (lengthStr !== 'all') {
+        const historyMsgCount = parseInt(lengthStr, 10);
+        
+        if (!isNaN(historyMsgCount) && historyMsgCount >= 0) {
+            // CRITICAL FIX:
+            // The config.contextLength (e.g. "2") represents the number of HISTORY messages to include (1 round = 2 msgs).
+            // But the 'history' array passed here ALREADY includes the CURRENT message at the very end.
+            // So if user wants "1 Round" (2 history msgs), we need 2 history + 1 current = 3 total messages.
+            // Slice logic: slice(-3) gives the last 3 items.
+            const totalMessagesToKeep = historyMsgCount + 1;
+            payloadMessages = history.slice(-totalMessagesToKeep);
         }
     }
 
-    // Construct Payload: Sanitize parts to remove UI-only fields (like `name` in InlineData)
+    // Construct Payload
     const contents = payloadMessages.map(msg => ({
       role: msg.role,
       parts: msg.parts.map(p => {
@@ -46,7 +53,8 @@ export class ChatApiService {
             }
           };
         }
-        return { text: p.text };
+        // Fallback for text to ensure it's never undefined/null
+        return { text: p.text || '' }; 
       })
     }));
 
@@ -95,7 +103,6 @@ export class ChatApiService {
                         const candidate = data.candidates?.[0];
                         
                         if (candidate?.content?.parts) {
-                            // Iterate over ALL parts, not just the first one
                             for (const part of candidate.content.parts) {
                                 callbacks.onChunk(part);
                             }
