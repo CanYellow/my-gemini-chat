@@ -79,7 +79,7 @@ const {
 const { settings } = useSettings();
 
 // UI State
-const pageTitle = ref('我的 Gemini 客户端');
+const pageTitle = ref('我的助手');
 const showSettings = ref(false);
 
 // --- Model Settings (with Persistence) ---
