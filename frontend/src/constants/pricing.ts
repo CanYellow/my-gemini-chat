@@ -1,7 +1,7 @@
 import type { ModelKey, ModelPricing } from '../types';
 
 export const MODEL_PRICING: Record<ModelKey, ModelPricing> = {
-  'gemini-3-pro-preview': {
+  'gemini-3.1-pro-preview': {
     tier1: { threshold: 200000, input: 2.00, output: 12.00 },
     tier2: { threshold: 200000, input: 4.00, output: 18.00 },
   },
@@ -16,7 +16,7 @@ export const MODEL_PRICING: Record<ModelKey, ModelPricing> = {
 };
 
 export const MODEL_NAME_MAPPING: Record<string, string> = {
-  'gemini-3-pro-preview': 'gemini-3-pro-preview',
+  'gemini-3.1-pro-preview': 'gemini-3.1-pro-preview',
   'gemini-2.5-pro': 'gemini-2.5-pro',
   'gemini-2.5-flash': 'gemini-2.5-flash',
 };
