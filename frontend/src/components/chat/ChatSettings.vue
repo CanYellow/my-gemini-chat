@@ -49,7 +49,7 @@
         @input="$emit('update:model', ($event.target as HTMLSelectElement).value as any)"
         class="setting-select model-select"
       >
-        <option value="gemini-3-pro-preview">Gemini 3-Pro-Preview</option>
+        <option value="gemini-3-pro-preview">Gemini-3.1-Pro-Preview</option>
         <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
         <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
       </select>
